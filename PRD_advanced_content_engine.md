@@ -279,3 +279,151 @@ HeyGen and/or D‑ID as initial candidates; keep vendor abstraction so we can sw
 - Default number of scenes per format and target pacing (e.g., 20s, 45s, 90s, 3min). Sora 2 supports clip lengths via a seconds parameter with supported values (4–20 seconds) per the prompting guide; longer outputs likely require stitched multi-clip pipelines.
 - Which lip-sync vendor is primary (HeyGen vs D‑ID) and any regional/legal constraints.
 - Publishing coverage list (which platforms are “must ship” vs “later”), plus per-platform constraints and approval requirements.
+
+## Implementation blueprint (v0.2 proposal)
+
+### Delivery principles
+- Ship smallest end-to-end loop first: **Topic input → Draft video → Timeline edits → Scheduled publish**.
+- Prefer deterministic and replayable stages over black-box chaining.
+- Persist every stage artifact so revisions do not require full regeneration.
+- Design every vendor integration as a replaceable adapter with explicit capability discovery.
+
+### MVP scope lock (Phase 1 build target)
+
+#### Included in MVP
+- News video pipeline (text/URL/RSS) with hook-first script generation.
+- Scene planner with continuity constraints and reusable character/style references.
+- Dual-ratio export (9:16 and 16:9) with burned captions and WebVTT sidecar.
+- Timeline editor core: trim/split, text overlays, caption edits, audio ducking.
+- Publishing connectors: YouTube + TikTok.
+- Scheduler with retries, idempotency, and status webhooks.
+
+#### Deferred post-MVP
+- Multi-actor conversational avatar scenes.
+- Full campaign approvals matrix (multi-step legal/compliance routing).
+- Enterprise SSO/SCIM and per-region data residency controls.
+- Auto A/B experimentation and dynamic creative optimization.
+
+### Functional requirements with IDs (testable)
+
+| ID | Requirement | Acceptance criteria |
+|---|---|---|
+| FR-ING-01 | Accept topic input from text, URL, RSS | Input form validates and enqueues job in under 2s for 95th percentile |
+| FR-SCR-01 | Generate hook-first script + scene list | Output contains hook + at least 3 scene objects with timing budget |
+| FR-CNS-01 | Maintain continuity graph | Scene transitions must preserve locked character traits unless override flag is set |
+| FR-VID-01 | Generate visual clips via adapter | Adapter returns provider job ID + normalized status payload |
+| FR-AUD-01 | Generate narration + optional music bed | Render contains narration stem and mixed master without clipping |
+| FR-REN-01 | Deterministic timeline render | Same timeline hash yields byte-stable export manifest |
+| FR-PUB-01 | Schedule/publish to YouTube | Valid private upload + publishAt flow succeeds with auditable status trail |
+| FR-PUB-02 | Post to TikTok | Upload init + transfer + publish/draft status tracked end-to-end |
+
+### Non-functional SLOs (initial)
+- **Pipeline orchestration availability:** 99.5% monthly.
+- **Median time to first preview (news pipeline):** ≤ 6 minutes.
+- **P95 render completion (≤60s output):** ≤ 4 minutes.
+- **Publish success rate (connector healthy):** ≥ 98%.
+- **Failed-job auto-recovery success:** ≥ 85% within 30 minutes.
+
+### Reference architecture (logical)
+
+```text
+[Web App/API]
+    |
+    v
+[Workflow Orchestrator] ---> [Policy/Safety Service]
+    |              \-------> [QC Service]
+    |                         |
+    v                         v
+[Planning Service] --> [Asset Graph Store] <-- [Media Storage/CDN]
+    |
+    v
+[Generation Router]
+  |        |         |
+  v        v         v
+[Sora]   [Veo]   [Avatar Vendor]
+  |
+  v
+[Render Service (FFmpeg)] ---> [Packaging Service] ---> [Publisher Adapters]
+                                                      |-> YouTube
+                                                      |-> TikTok
+                                                      |-> LinkedIn/Meta (later)
+```
+
+### Canonical data model (minimum entities)
+- **Workspace**: tenant boundary, quotas, policy profile.
+- **Project**: top-level production container, target platforms, status.
+- **SourceItem**: URL/RSS/text input with provenance metadata.
+- **ScriptDraft**: versioned script with hook/body/cta blocks.
+- **ScenePlan**: ordered scenes with duration budget and continuity locks.
+- **Asset**: image/video/audio/caption with checksum, rights metadata, lineage.
+- **Timeline**: editable sequence graph for render compilation.
+- **RenderJob**: deterministic job descriptor and output bundle references.
+- **PublishJob**: per-platform publish attempt log with retries and final state.
+
+### API contract sketch (internal)
+
+#### Orchestration
+- `POST /v1/projects/{id}/pipelines/news:run`
+- `POST /v1/projects/{id}/pipelines/avatars:run`
+- `POST /v1/projects/{id}/pipelines/music:run`
+- `POST /v1/projects/{id}/pipelines/shorts:run`
+
+#### Assets and timelines
+- `POST /v1/projects/{id}/assets`
+- `GET /v1/projects/{id}/assets?type=video`
+- `POST /v1/projects/{id}/timelines`
+- `POST /v1/timelines/{id}:render`
+
+#### Publishing
+- `POST /v1/projects/{id}/publish/youtube`
+- `POST /v1/projects/{id}/publish/tiktok`
+- `POST /v1/publish-jobs/{id}:retry`
+
+### Queueing, idempotency, and retries
+- Every external vendor call carries an idempotency key derived from `(workspace_id, project_id, stage, version)`.
+- Retries use exponential backoff with capped jitter and max-attempt policy per stage.
+- Poison messages route to dead-letter queues with one-click replay in admin UI.
+- Webhook events are accepted as at-least-once delivery and deduplicated by `(provider, event_id)`.
+
+### Quality gates before publish (blocking)
+- **Visual:** face/character lock drift over threshold, subtitle safe-area overflow.
+- **Audio:** LUFS target deviation, peak clipping, speech-to-music ratio floor.
+- **Metadata:** title length/platform field validity/hashtag/tag format.
+- **Rights:** stock-asset rights field present, user attestation present for avatar use.
+- **Policy:** impersonation risk and banned-terms check status = pass.
+
+### Security controls (minimum)
+- Encrypt OAuth and API secrets with managed KMS keys.
+- Enforce scoped tokens and periodic reauth for social connectors.
+- Asset access controlled by workspace role and signed URL TTL.
+- Immutable audit trail for generation, edits, and publish actions.
+
+### Rollout plan with deliverables
+
+#### Milestone M1 (Weeks 1-4)
+- News pipeline v1 (text/URL/RSS), script + scene planner, single-ratio preview.
+- Asset graph store + lineage capture.
+- Basic timeline editor and render service integration.
+
+#### Milestone M2 (Weeks 5-8)
+- Dual-ratio exports, caption workflow, QC gates.
+- YouTube/TikTok adapters with scheduler + retries.
+- Workspace analytics dashboard (time-to-draft, publish success, error classes).
+
+#### Milestone M3 (Weeks 9-12)
+- Avatar 5-way parallel generation with vendor abstraction.
+- Music variant pipeline (AI mode first, Pexels mode second).
+- Long-to-shorts beta and metadata autopackaging.
+
+### Open decisions converted to explicit choices needed
+1. **Primary avatar vendor:** choose HeyGen or D-ID for default path.
+2. **Default news runtime:** pick target lengths by platform (e.g., 30s/60s/90s).
+3. **Hard policy defaults:** watermark on/off, impersonation review threshold, attestation wording.
+4. **Initial platform matrix:** confirm YouTube + TikTok as must-ship, others phased.
+5. **Cost guardrails:** per-project and per-workspace spend ceilings with fail-safe behavior.
+
+### Definition of done for v1 launch
+- A user can generate, edit, and schedule at least 5 videos from one topic flow.
+- At least 95% of successful jobs include complete lineage and rights metadata.
+- P95 time-to-first-preview and publish success SLOs are met for 2 consecutive weeks.
+- Safety, rights, and audit requirements pass internal review checklist.
