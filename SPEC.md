@@ -4,7 +4,7 @@ A platform for monitoring RSS news feeds and turning news items into branded soc
 media content: image posts, short (≤5s) template videos, and full AI-generated
 article-to-video productions.
 
-Owner: Fadaat Media · Status: **Draft v1 — decisions confirmed, open questions at the end**
+Owner: Fadaat Media · Status: **v1.1 — all decisions confirmed**
 
 ---
 
@@ -19,7 +19,13 @@ Owner: Fadaat Media · Status: **Draft v1 — decisions confirmed, open question
 | Languages | **Arabic + English**, bilingual from day one: RTL-aware template editor, Arabic fonts, Arabic TTS voices, Arabic word-level captions |
 | Image search | Self-hosted **SearxNG** (Docker) with editable search queries |
 | Scene video sources | Free stock APIs (Pexels Video, Pixabay Video) + SearxNG video search + **any user-connected MRSS feed** (pluggable source interface) |
-| AI provider | **fal.ai** for LLM (script generation), image generation, video generation (scene animation), Whisper transcription; **ElevenLabs or fal** for music; TTS provider per §10 open question |
+| AI provider | **fal.ai** for LLM (script generation), image generation, video generation (scene animation), Whisper transcription; **ElevenLabs or fal** for music |
+| TTS | **ElevenLabs** (default — best Arabic voices), fal as fallback; keys via environment variables |
+| Video length | Article-to-video up to **30 minutes** — pipeline is chunked (per-scene TTS/render, segment-wise ffmpeg assembly, resumable jobs) |
+| Feed scale | Up to **~100 concurrent feeds** at the 30s polling interval |
+| Captions | Alex Hormozi style as the first built-in caption preset (word-by-word pop, emphasis colors), further presets user-definable |
+| Storage | **Per-brand choice**: each brand configures local disk or S3-compatible storage for its media/renders |
+| Access control | **Admin + Editor roles from v1** (admin: users, brands, settings; editor: feeds, content, templates, renders) |
 | Rendering | **ffmpeg** on the worker for final video assembly |
 | Delivery | Phased — RSS inbox first (see §9) |
 
@@ -47,7 +53,9 @@ Each brand holds the identity used by all templates and renders:
 - Logo(s) (light/dark variants), color palette, fonts (Arabic + Latin).
 - Default logo **position/size per template** (overridable per template).
 - Video **intro** and **outro** clips/slates (per aspect ratio).
-- Default TTS voice, default caption style, default music preferences.
+- Default TTS voice (ElevenLabs), default caption style, default music preferences.
+- **Storage backend**: local disk or S3-compatible (endpoint/bucket/credentials) —
+  all media and renders for the brand are stored there via the storage abstraction.
 
 ## 4. Module: Image post studio (trending social templates)
 
@@ -75,7 +83,11 @@ Each brand holds the identity used by all templates and renders:
 
 ## 6. Module: Article → Video pipeline
 
-End-to-end flow for turning an article into a narrated video:
+End-to-end flow for turning an article into a narrated video of up to **30 minutes**.
+Everything is scene-chunked so long videos stay editable and renders are resumable:
+script is generated chapter-by-chapter, each scene's TTS/visual/animation is its own
+queue job, scenes render to individual segments, and final assembly concatenates
+segments — a failed step retries alone without redoing the rest.
 
 1. **Select article** from inbox → choose **video template** (16:9 or 9:16) and brand.
 2. **Script generation**: fal.ai LLM (GPT-class model) writes a narration script and
@@ -126,7 +138,8 @@ docker-compose:
 - All AI calls (LLM, image, video, Whisper) go through a thin provider layer so models
   can be swapped; fal.ai is the default backend.
 - Media (uploads, generated assets, renders) stored on a mounted volume, served by the app.
-- Auth: NextAuth (credentials to start), single organization, role field for later use.
+- Auth: NextAuth (credentials), single organization, **admin/editor roles** enforced
+  from v1 (admin: user management, brands, storage settings; editor: everything else).
 
 ### Core data model (sketch)
 
@@ -148,20 +161,20 @@ asset, animation, tts audio, transition-out) · `MusicTrack` · `MediaAsset` ·
 4. **Phase 4 — Article → Video**: script/scenes, SearxNG + stock + MRSS + AI visuals,
    TTS, Ken Burns/AI animation, transitions, Whisper captions, music library, final render.
 
-## 10. Open questions (to confirm)
+## 10. Resolved questions (2026-07-13)
 
-1. **TTS provider**: the brief says fal.ai for TTS, but ElevenLabs (already used for
-   music) has notably better **Arabic** voices. Proposal: ElevenLabs as default TTS,
-   fal as fallback. OK?
-2. **API keys**: fal.ai and ElevenLabs keys will be supplied via environment variables —
-   do you already have both accounts?
-3. **Article-to-video length**: cap the narrated video (e.g. 60–90s ≈ 6–10 scenes)?
-4. **Feed scale**: roughly how many feeds will run at once? (Affects polling fan-out; the
-   design targets ~100 feeds comfortably.)
-5. **Caption look**: any reference video for the exact Hormozi caption style you want
-   (colors, emoji, box vs. plain)? Styles are presets, so we just need the first one.
-6. **Image post export**: client-side canvas export (instant, per-user browser) is the
-   default; is server-side batch export needed too?
-7. **Storage**: local disk volume is the Phase-1 default; want S3/MinIO from the start?
-8. **Access**: how many team members initially, and do you need roles (admin/editor) in
-   v1 or is a shared login acceptable?
+1. **TTS provider** → ElevenLabs (default), fal fallback.
+2. **API keys** → fal.ai + ElevenLabs accounts exist; supplied via env vars.
+3. **Article-to-video length** → up to **30 minutes**. Implications: scripts are
+   generated chapter-by-chapter; TTS, visuals, and rendering happen per scene with
+   resumable queue jobs; final assembly concatenates pre-rendered scene segments so a
+   failure never restarts the whole video.
+4. **Feed scale** → up to ~100 feeds; poller uses staggered scheduling + conditional
+   GETs, well within a single worker.
+5. **Caption style** → Alex Hormozi style ships as the first preset.
+6. **Image post export** → client-side canvas export (server-side batch export can be
+   added later if needed).
+7. **Storage** → per-brand storage backend: each brand chooses local disk or
+   S3-compatible (endpoint, bucket, credentials) in brand settings; a storage
+   abstraction layer routes reads/writes.
+8. **Access** → admin + editor roles from v1.

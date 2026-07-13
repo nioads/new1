@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(EDITOR)
+  createdAt    DateTime @default(now())
+
+  pushSubscriptions PushSubscription[]
+}
+
+// Brand is minimal in Phase 1 (feeds can be associated to a brand);
+// logo/colors/fonts/storage config land in Phase 2.
+model Brand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  feeds Feed[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#6366f1")
+  muted     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  feeds Feed[]
+  items NewsItem[]
+}
+
+model Feed {
+  id           String    @id @default(cuid())
+  url          String    @unique
+  title        String    @default("")
+  siteUrl      String    @default("")
+  enabled      Boolean   @default(true)
+  muted        Boolean   @default(false)
+  categoryId   String
+  category     Category  @relation(fields: [categoryId], references: [id])
+  brandId      String?
+  brand        Brand?    @relation(fields: [brandId], references: [id])
+  // conditional GET state
+  etag         String    @default("")
+  lastModified String    @default("")
+  lastCheckedAt DateTime?
+  lastError    String    @default("")
+  errorCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  items NewsItem[]
+
+  @@index([enabled])
+}
+
+model NewsItem {
+  id          String    @id @default(cuid())
+  feedId      String
+  feed        Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  guid        String
+  link        String    @default("")
+  title       String
+  summary     String    @default("")
+  content     String    @default("")
+  author      String    @default("")
+  imageUrl    String    @default("")
+  publishedAt DateTime
+  fetchedAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  @@unique([feedId, guid])
+  @@index([publishedAt(sort: Desc)])
+  @@index([categoryId, publishedAt(sort: Desc)])
+  @@index([feedId, publishedAt(sort: Desc)])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
