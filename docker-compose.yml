@@ -2,11 +2,14 @@ services:
   web:
     build: ./app
     command: sh -c "npx prisma migrate deploy && npm run db:seed && npm run start"
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:-app}@postgres:5432/newsstudio
-      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      # Dev fallback so first run needs zero setup. Override in production:
+      #   AUTH_SECRET=$(openssl rand -base64 32) docker compose up -d
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-secret-override-in-production}
       AUTH_TRUST_HOST: "true"
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -20,6 +23,7 @@ services:
   worker:
     build: ./app
     command: npm run worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:-app}@postgres:5432/newsstudio
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
@@ -34,6 +38,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}

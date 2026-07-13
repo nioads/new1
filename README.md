@@ -14,18 +14,29 @@ Next.js 15 (App Router) · PostgreSQL + Prisma 7 · NextAuth v5 (credentials,
 admin/editor roles) · standalone Node polling worker · Tailwind CSS 4 ·
 Docker Compose (web, worker, postgres, redis, searxng).
 
-## Quick start (Docker)
+## Quick start (Docker — works on Windows, macOS, Linux)
 
 ```bash
-cp app/.env.example app/.env       # reference for variables
-export AUTH_SECRET=$(openssl rand -base64 32)
-# optional but recommended — enables browser push notifications:
-# npx web-push generate-vapid-keys   → export VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY
+git clone https://github.com/nioads/new1.git
+cd new1
+git checkout claude/rss-news-social-templates-mnmiwy
 docker compose up --build
 ```
 
-Open http://localhost:3000 — default login `admin@example.com` / `admin1234`
-(override with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`; change it immediately).
+No environment setup needed for a first run. Open http://localhost:3000 —
+default login `admin@example.com` / `admin1234`.
+
+For **production**, always override the dev defaults:
+
+```bash
+AUTH_SECRET=$(openssl rand -base64 32) \
+SEED_ADMIN_PASSWORD=your-strong-password \
+docker compose up --build -d
+```
+
+To enable **browser push notifications**, generate keys with
+`npx web-push generate-vapid-keys` and set `VAPID_PUBLIC_KEY` /
+`VAPID_PRIVATE_KEY` before starting.
 
 ## Local development
 

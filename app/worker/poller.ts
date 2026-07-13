@@ -109,10 +109,18 @@ async function pollFeed(feedId: string) {
 
 async function tick() {
   const now = Date.now();
-  const candidates = await prisma.feed.findMany({
-    where: { enabled: true },
-    select: { id: true, lastCheckedAt: true, errorCount: true },
-  });
+  let candidates;
+  try {
+    candidates = await prisma.feed.findMany({
+      where: { enabled: true },
+      select: { id: true, lastCheckedAt: true, errorCount: true },
+    });
+  } catch (err) {
+    // DB unreachable (e.g. still starting up) — skip this tick and retry.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[poller] database not reachable, retrying next tick: ${message}`);
+    return;
+  }
 
   const due = candidates.filter((f) => {
     if (inFlight.has(f.id)) return false;
@@ -133,5 +141,7 @@ async function tick() {
 console.log(
   `[poller] started — interval ${POLL_INTERVAL_MS}ms, tick ${TICK_MS}ms, concurrency ${CONCURRENCY}`,
 );
-setInterval(tick, TICK_MS);
-tick();
+setInterval(() => {
+  tick().catch((err) => console.error("[poller] tick failed:", err));
+}, TICK_MS);
+tick().catch((err) => console.error("[poller] tick failed:", err));
