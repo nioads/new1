@@ -71,10 +71,26 @@ export type VariantDto = {
   elements: TemplateElement[];
 };
 
+export type MotionSettings = {
+  duration: number; // seconds, ≤5
+  kenburns: "in" | "out" | "left" | "right" | "none";
+  textAnim: "fade" | "slideup" | "none";
+};
+
+export const TEMPLATE_KINDS = [
+  "breaking",
+  "quotes",
+  "events",
+  "attacks",
+  "custom",
+] as const;
+
 export type TemplateDto = {
   id: string;
   name: string;
   brandId: string | null;
+  kind: string;
+  motion: MotionSettings | null;
   brand?: { id: string; name: string; logoUrl: string; primaryColor: string } | null;
   variants: VariantDto[];
   updatedAt?: string;

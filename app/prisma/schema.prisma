@@ -87,10 +87,39 @@ model ImageTemplate {
   name      String
   brandId   String?
   brand     Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  // editorial style: breaking | quotes | events | attacks | custom
+  kind      String   @default("breaking")
+  // video motion defaults: {duration, fps, kenburns, textAnim}
+  motion    Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   variants TemplateVariant[]
+}
+
+enum RenderStatus {
+  QUEUED
+  PROCESSING
+  DONE
+  ERROR
+}
+
+// DB-backed render queue consumed by the worker's ffmpeg pipeline.
+model VideoRender {
+  id         String       @id @default(cuid())
+  status     RenderStatus @default(QUEUED)
+  aspect     String
+  // {width, height, duration, fps, background:{kind,path|url}, overlayPath, kenburns, textAnim}
+  params     Json
+  outputUrl  String       @default("")
+  error      String       @default("")
+  itemId     String?
+  templateId String?
+  brandId    String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([status, createdAt])
 }
 
 // One template has up to three linked size variants.

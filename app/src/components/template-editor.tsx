@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type {
   Aspect,
+  MotionSettings,
   TemplateDto,
   TemplateElement,
   TextElement,
   VariantDto,
 } from "@/lib/template-types";
-import { elementId } from "@/lib/template-types";
+import { elementId, TEMPLATE_KINDS } from "@/lib/template-types";
 import type { BrandDto } from "@/lib/types";
 import { TemplateCanvas, type Bindings } from "@/components/canvas/template-canvas";
 
@@ -160,6 +161,8 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
       body: JSON.stringify({
         name: template.name,
         brandId: template.brandId,
+        kind: template.kind,
+        motion: template.motion ?? { duration: 5, kenburns: "in", textAnim: "slideup" },
         variants: template.variants.map((v: VariantDto) => ({
           aspect: v.aspect,
           elements: v.elements,
@@ -198,6 +201,39 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
               {b.name}
             </option>
           ))}
+        </select>
+        <select
+          value={template.kind}
+          title="Editorial style"
+          onChange={(e) => setTemplate({ ...template, kind: e.target.value })}
+          className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-sm capitalize"
+        >
+          {TEMPLATE_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+        <select
+          value={template.motion?.kenburns ?? "in"}
+          title="Default video motion"
+          onChange={(e) =>
+            setTemplate({
+              ...template,
+              motion: {
+                duration: template.motion?.duration ?? 5,
+                textAnim: template.motion?.textAnim ?? "slideup",
+                kenburns: e.target.value as MotionSettings["kenburns"],
+              },
+            })
+          }
+          className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-sm"
+        >
+          <option value="in">🎬 Zoom in</option>
+          <option value="out">🎬 Zoom out</option>
+          <option value="left">🎬 Pan left</option>
+          <option value="right">🎬 Pan right</option>
+          <option value="none">🎬 Still</option>
         </select>
         <div className="ml-auto flex items-center gap-2">
           {savedAt && <span className="text-xs text-emerald-400">Saved ✓</span>}

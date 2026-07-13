@@ -1,5 +1,5 @@
 FROM node:22-alpine AS base
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl ffmpeg
 WORKDIR /app
 
 FROM base AS deps

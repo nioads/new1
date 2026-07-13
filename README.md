@@ -4,7 +4,7 @@ Monitor RSS news feeds and turn items into branded social content — image post
 short template videos, and AI article-to-video productions. See [SPEC.md](./SPEC.md)
 for the full product specification and phase plan.
 
-**Current status: Phases 1–2 complete**
+**Current status: Phases 1–3 complete**
 
 - *Phase 1* — RSS feeds + categories, news inbox with filters, ~30-second polling
   worker with dedupe + conditional GETs, live in-app updates (SSE), browser Web
@@ -15,6 +15,13 @@ for the full product specification and phase plan.
   three linked sizes 16:9 / 9:16 / 1:1, role-bound text), and a **post composer**
   that fills a template from any inbox item, lets you pick any scraped image or
   upload one, adjust zoom/position, and export full-resolution PNGs per size.
+- *Phase 3* — **short video posts (≤5s)** rendered by ffmpeg in the worker:
+  templates carry an editorial kind (breaking/quotes/events/attacks/custom) and
+  motion defaults; the composer exports videos per size with Ken Burns motion
+  (zoom/pan) on image backgrounds or a looped, cover-cropped **article video**
+  background, plus animated text overlays (slide-up/fade). Renders queue in the
+  database, process in the worker, and land in the brand's storage as
+  H.264 MP4s with live status + download in the composer.
 
 ## Stack
 
@@ -83,6 +90,5 @@ npm run worker     # feed poller (separate terminal)
 
 ## Roadmap
 
-- **Phase 3** — ≤5s video templates (breaking/quotes/events/…) rendered with ffmpeg
 - **Phase 4** — article → video: AI script/scenes, SearxNG/stock/MRSS visuals,
   ElevenLabs TTS, Whisper captions (Hormozi style), music library, up-to-30-min renders

@@ -43,8 +43,8 @@ type RawItem = {
   author?: string;
   isoDate?: string;
   pubDate?: string;
-  enclosure?: { url?: string; type?: string };
   // custom keepArray mapping returns raw XML nodes with attributes under $
+  enclosure?: { url?: string; type?: string; $?: { url?: string; type?: string } };
   enclosures?: Array<{ url?: string; type?: string; $?: { url?: string; type?: string } }>;
   mediaContent?: Array<{ $?: { url?: string; medium?: string; type?: string } }>;
   mediaThumbnail?: Array<{ $?: { url?: string } }>;

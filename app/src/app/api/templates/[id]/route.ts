@@ -28,6 +28,15 @@ export async function GET(
 const patchSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   brandId: z.string().nullable().optional(),
+  kind: z.string().max(40).optional(),
+  motion: z
+    .object({
+      duration: z.number().min(1).max(5),
+      kenburns: z.enum(["in", "out", "left", "right", "none"]),
+      textAnim: z.enum(["fade", "slideup", "none"]),
+    })
+    .nullable()
+    .optional(),
   variants: z
     .array(
       z.object({
@@ -47,12 +56,16 @@ export async function PATCH(
     const { id } = await params;
     const body = patchSchema.parse(await req.json());
 
-    if (body.name !== undefined || body.brandId !== undefined) {
+    if (body.name !== undefined || body.brandId !== undefined || body.kind !== undefined || body.motion !== undefined) {
       await prisma.imageTemplate.update({
         where: { id },
         data: {
           ...(body.name !== undefined ? { name: body.name.trim() } : {}),
           ...(body.brandId !== undefined ? { brandId: body.brandId || null } : {}),
+          ...(body.kind !== undefined ? { kind: body.kind } : {}),
+          ...(body.motion !== undefined
+            ? { motion: body.motion === null ? undefined : JSON.parse(JSON.stringify(body.motion)) }
+            : {}),
         },
       });
     }

@@ -331,13 +331,12 @@ export function Inbox() {
               >
                 🖼 Image post
               </a>
-              <button
-                disabled
-                title="Coming in Phase 3"
-                className="rounded-lg bg-indigo-600/30 px-3 py-1.5 text-xs text-indigo-300 opacity-60 cursor-not-allowed"
+              <a
+                href={`/compose/${selected.id}`}
+                className="rounded-lg bg-fuchsia-700 hover:bg-fuchsia-600 px-3 py-1.5 text-xs text-white font-medium"
               >
                 🎬 Short video
-              </button>
+              </a>
               <button
                 disabled
                 title="Coming in Phase 4"

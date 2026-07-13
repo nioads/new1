@@ -8,6 +8,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { fetchFeed } from "../src/lib/rss";
 import { broadcastPush } from "../src/lib/push";
+import { processNextRender } from "../src/lib/render";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -166,3 +167,19 @@ setInterval(() => {
   tick().catch((err) => console.error("[poller] tick failed:", err));
 }, TICK_MS);
 tick().catch((err) => console.error("[poller] tick failed:", err));
+
+// Video render queue: drain serially, checking every 3s when idle.
+let rendering = false;
+setInterval(async () => {
+  if (rendering) return;
+  rendering = true;
+  try {
+    while (await processNextRender(prisma)) {
+      /* keep draining */
+    }
+  } catch (err) {
+    console.error("[render] queue error:", err);
+  } finally {
+    rendering = false;
+  }
+}, 3000);

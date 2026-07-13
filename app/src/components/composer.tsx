@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type Konva from "konva";
-import type { Aspect, ImageElement, TemplateDto } from "@/lib/template-types";
+import type { Aspect, ImageElement, MotionSettings, TemplateDto } from "@/lib/template-types";
 import type { BrandDto, NewsItemDto } from "@/lib/types";
 import { TemplateCanvas, type Bindings } from "@/components/canvas/template-canvas";
+
+type RenderDto = {
+  id: string;
+  status: "QUEUED" | "PROCESSING" | "DONE" | "ERROR";
+  aspect: string;
+  outputUrl: string;
+  error: string;
+  createdAt: string;
+};
 
 const CANVAS_BOX = 620;
 
@@ -26,6 +35,15 @@ export function Composer({ itemId }: { itemId: string }) {
   const [bgAdjust, setBgAdjust] = useState({ zoom: 1, offsetX: 0, offsetY: 0 });
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [bgKind, setBgKind] = useState<"image" | "video">("image");
+  const [motion, setMotion] = useState<MotionSettings>({
+    duration: 5,
+    kenburns: "in",
+    textAnim: "slideup",
+  });
+  const [layer, setLayer] = useState<"all" | "bg" | "overlay">("all");
+  const [videoBusy, setVideoBusy] = useState<string | null>(null);
+  const [renders, setRenders] = useState<RenderDto[]>([]);
   const stageRef = useRef<Konva.Stage>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +72,22 @@ export function Composer({ itemId }: { itemId: string }) {
   const brand = brands.find((b) => b.id === brandId) ?? null;
   const baseVariant = template?.variants.find((v) => v.aspect === aspect) ?? null;
 
+  // template motion defaults
+  useEffect(() => {
+    if (template?.motion) setMotion(template.motion);
+  }, [template?.id, template?.motion]);
+
+  // poll renders while any are pending
+  const loadRenders = useCallback(() => {
+    fetch(`/api/renders?item=${itemId}`).then((r) => r.json()).then(setRenders);
+  }, [itemId]);
+  useEffect(loadRenders, [loadRenders]);
+  useEffect(() => {
+    if (!renders.some((r) => r.status === "QUEUED" || r.status === "PROCESSING")) return;
+    const t = setInterval(loadRenders, 3000);
+    return () => clearInterval(t);
+  }, [renders, loadRenders]);
+
   // Apply background pan/zoom on top of the template's background slot.
   const variant = useMemo(() => {
     if (!baseVariant) return null;
@@ -80,7 +114,8 @@ export function Composer({ itemId }: { itemId: string }) {
   );
 
   const images = item?.media?.filter((m) => m.type === "IMAGE") ?? [];
-  const otherMedia = item?.media?.filter((m) => m.type !== "IMAGE") ?? [];
+  const videos = item?.media?.filter((m) => m.type === "VIDEO") ?? [];
+  const otherMedia = item?.media?.filter((m) => m.type === "AUDIO") ?? [];
 
   async function uploadImage(file: File) {
     setUploading(true);
@@ -92,6 +127,64 @@ export function Composer({ itemId }: { itemId: string }) {
     if (res.ok) {
       const asset = await res.json();
       setBackgroundSrc(asset.url);
+    }
+  }
+
+  async function snapshotLayer(which: "bg" | "overlay", scaleFactor: number): Promise<string> {
+    setLayer(which);
+    await new Promise((r) => setTimeout(r, 700));
+    const stage = stageRef.current;
+    if (!stage) throw new Error("canvas not ready");
+    return stage.toDataURL({ pixelRatio: 1 / scaleFactor, mimeType: "image/png" });
+  }
+
+  async function exportVideo(targetAspect: Aspect) {
+    if (!template) return;
+    setVideoBusy(targetAspect);
+    setAspect(targetAspect);
+    await new Promise((r) => setTimeout(r, 900));
+    const v = template.variants.find((x) => x.aspect === targetAspect);
+    if (!v) return;
+    const scaleFactor = Math.min(CANVAS_BOX / v.width, CANVAS_BOX / v.height);
+    try {
+      const overlayDataUrl = await snapshotLayer("overlay", scaleFactor);
+      let backgroundDataUrl: string | undefined;
+      let backgroundUrl: string | undefined;
+      if (bgKind === "video") {
+        backgroundUrl = backgroundSrc;
+      } else {
+        backgroundDataUrl = await snapshotLayer("bg", scaleFactor);
+      }
+      setLayer("all");
+      const res = await fetch("/api/renders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId,
+          templateId: template.id,
+          brandId: brandId || undefined,
+          aspect: targetAspect,
+          width: v.width,
+          height: v.height,
+          duration: motion.duration,
+          backgroundKind: bgKind,
+          backgroundDataUrl,
+          backgroundUrl,
+          overlayDataUrl,
+          kenburns: motion.kenburns,
+          textAnim: motion.textAnim,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error ?? "Render failed to queue");
+      }
+      loadRenders();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setLayer("all");
+      setVideoBusy(null);
     }
   }
 
@@ -217,6 +310,7 @@ export function Composer({ itemId }: { itemId: string }) {
                   key={m.id}
                   onClick={() => {
                     setBackgroundSrc(m.url);
+                    setBgKind("image");
                     setBgAdjust({ zoom: 1, offsetX: 0, offsetY: 0 });
                   }}
                   className={`aspect-square rounded-lg overflow-hidden border-2 ${
@@ -234,9 +328,35 @@ export function Composer({ itemId }: { itemId: string }) {
                 </p>
               )}
             </div>
+            {videos.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-slate-400 mb-1">Article videos ({videos.length})</p>
+                <div className="space-y-1">
+                  {videos.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        setBackgroundSrc(m.url);
+                        setBgKind("video");
+                      }}
+                      className={`w-full text-left rounded-lg px-2 py-1.5 text-xs truncate border ${
+                        backgroundSrc === m.url && bgKind === "video"
+                          ? "border-indigo-500 text-indigo-300"
+                          : "border-slate-800 text-slate-400 hover:border-slate-600"
+                      }`}
+                    >
+                      🎬 {m.url.split("/").pop()}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-slate-600">
+                  Video backgrounds apply to video exports (loops, cover-cropped).
+                </p>
+              </div>
+            )}
             {otherMedia.length > 0 && (
               <p className="mt-2 text-[11px] text-slate-500">
-                +{otherMedia.length} video/audio file(s) captured — used in video phases.
+                +{otherMedia.length} audio file(s) captured — used in video phases.
               </p>
             )}
           </div>
@@ -305,27 +425,116 @@ export function Composer({ itemId }: { itemId: string }) {
                 bindings={bindings}
                 scale={scale}
                 fontFamily={brand?.fontFamily || undefined}
+                layer={layer}
               />
             </div>
           )}
         </div>
 
         {/* right: export */}
-        <div className="w-56 shrink-0 border-l border-slate-800 p-3 space-y-2 overflow-y-auto">
+        <div className="w-64 shrink-0 border-l border-slate-800 p-3 space-y-2 overflow-y-auto">
           <p className="text-xs text-slate-400">Export PNG</p>
           {template?.variants.map((v) => (
             <button
               key={v.aspect}
               onClick={() => exportSize(v.aspect)}
-              disabled={exporting !== null}
+              disabled={exporting !== null || bgKind === "video"}
               className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-3 py-2 text-sm font-medium"
             >
               {exporting === v.aspect ? "Exporting…" : `⬇ ${v.aspect} (${v.width}×${v.height})`}
             </button>
           ))}
-          <p className="text-[11px] text-slate-600 pt-2">
-            Exports render at full resolution regardless of preview size.
-          </p>
+
+          <div className="pt-3 border-t border-slate-800 space-y-2">
+            <p className="text-xs text-slate-400">Video post (≤5s)</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-[11px] text-slate-500">
+                Duration
+                <select
+                  value={motion.duration}
+                  onChange={(e) => setMotion({ ...motion, duration: Number(e.target.value) })}
+                  className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                >
+                  {[3, 4, 5].map((d) => (
+                    <option key={d} value={d}>
+                      {d}s
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[11px] text-slate-500">
+                Motion
+                <select
+                  value={motion.kenburns}
+                  onChange={(e) =>
+                    setMotion({ ...motion, kenburns: e.target.value as MotionSettings["kenburns"] })
+                  }
+                  className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                >
+                  <option value="in">Zoom in</option>
+                  <option value="out">Zoom out</option>
+                  <option value="left">Pan left</option>
+                  <option value="right">Pan right</option>
+                  <option value="none">Still</option>
+                </select>
+              </label>
+              <label className="col-span-2 block text-[11px] text-slate-500">
+                Text animation
+                <select
+                  value={motion.textAnim}
+                  onChange={(e) =>
+                    setMotion({ ...motion, textAnim: e.target.value as MotionSettings["textAnim"] })
+                  }
+                  className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                >
+                  <option value="slideup">Slide up + fade</option>
+                  <option value="fade">Fade in</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+            </div>
+            {template?.variants.map((v) => (
+              <button
+                key={v.aspect}
+                onClick={() => exportVideo(v.aspect)}
+                disabled={videoBusy !== null}
+                className="w-full rounded-lg bg-fuchsia-700 hover:bg-fuchsia-600 disabled:opacity-50 px-3 py-2 text-sm font-medium"
+              >
+                {videoBusy === v.aspect ? "Preparing…" : `🎬 ${v.aspect} video`}
+              </button>
+            ))}
+          </div>
+
+          {renders.length > 0 && (
+            <div className="pt-3 border-t border-slate-800 space-y-1.5">
+              <p className="text-xs text-slate-400">Renders</p>
+              {renders.map((r) => (
+                <div
+                  key={r.id}
+                  className="rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-2 text-xs flex items-center gap-2"
+                >
+                  <span className="text-slate-400">{r.aspect}</span>
+                  {r.status === "DONE" ? (
+                    <a
+                      href={r.outputUrl}
+                      download
+                      className="ml-auto text-emerald-400 hover:text-emerald-300"
+                    >
+                      ⬇ MP4
+                    </a>
+                  ) : r.status === "ERROR" ? (
+                    <span className="ml-auto text-red-400 truncate max-w-32" title={r.error}>
+                      failed
+                    </span>
+                  ) : (
+                    <span className="ml-auto text-amber-400 animate-pulse">
+                      {r.status.toLowerCase()}…
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

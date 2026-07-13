@@ -240,11 +240,24 @@ export type TemplateCanvasProps = {
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   onElementChange?: (el: TemplateElement) => void;
+  // "bg": only the background image (for video base frames);
+  // "overlay": everything except the background, on transparency.
+  layer?: "all" | "bg" | "overlay";
 };
 
 export const TemplateCanvas = forwardRef<Konva.Stage, TemplateCanvasProps>(
   function TemplateCanvas(
-    { variant, bindings, scale, fontFamily, editable = false, selectedId, onSelect, onElementChange },
+    {
+      variant,
+      bindings,
+      scale,
+      fontFamily,
+      editable = false,
+      selectedId,
+      onSelect,
+      onElementChange,
+      layer = "all",
+    },
     stageRef,
   ) {
     const trRef = useRef<Konva.Transformer>(null);
@@ -268,8 +281,18 @@ export const TemplateCanvas = forwardRef<Konva.Stage, TemplateCanvasProps>(
         }}
       >
         <Layer ref={layerRef}>
-          <Rect x={0} y={0} width={variant.width} height={variant.height} fill="#0f172a" />
-          {variant.elements.map((el) => (
+          {layer !== "overlay" && (
+            <Rect x={0} y={0} width={variant.width} height={variant.height} fill="#0f172a" />
+          )}
+          {variant.elements
+            .filter((el) => {
+              const isBackground =
+                el.kind === "image" && (el as ImageElement).role === "background";
+              if (layer === "bg") return isBackground;
+              if (layer === "overlay") return !isBackground;
+              return true;
+            })
+            .map((el) => (
             <ElementNode
               key={el.id}
               el={el}
@@ -279,7 +302,7 @@ export const TemplateCanvas = forwardRef<Konva.Stage, TemplateCanvasProps>(
               onSelect={(id) => onSelect?.(id)}
               onChange={onElementChange}
             />
-          ))}
+            ))}
           {editable && (
             <Transformer
               ref={trRef}
