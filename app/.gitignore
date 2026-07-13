@@ -45,3 +45,6 @@ next-env.d.ts
 
 # generated prisma client
 src/generated/
+
+# uploaded media (local storage driver)
+data/

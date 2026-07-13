@@ -4,9 +4,17 @@ Monitor RSS news feeds and turn items into branded social content — image post
 short template videos, and AI article-to-video productions. See [SPEC.md](./SPEC.md)
 for the full product specification and phase plan.
 
-**Current status: Phase 1 complete** — RSS feeds + categories, news inbox with
-filters, ~30-second polling worker with dedupe + conditional GETs, live in-app
-updates (SSE), browser Web Push notifications, and admin/editor user management.
+**Current status: Phases 1–2 complete**
+
+- *Phase 1* — RSS feeds + categories, news inbox with filters, ~30-second polling
+  worker with dedupe + conditional GETs, live in-app updates (SSE), browser Web
+  Push notifications, admin/editor user management.
+- *Phase 2* — full media scraping from feeds (all enclosures/media:content/
+  thumbnails/embedded files per item), brand kits (logo upload, colors, font,
+  per-brand local/S3 storage), image-post **template designer** (canvas editor,
+  three linked sizes 16:9 / 9:16 / 1:1, role-bound text), and a **post composer**
+  that fills a template from any inbox item, lets you pick any scraped image or
+  upload one, adjust zoom/position, and export full-resolution PNGs per size.
 
 ## Stack
 
@@ -75,7 +83,6 @@ npm run worker     # feed poller (separate terminal)
 
 ## Roadmap
 
-- **Phase 2** — brand kits + image-post template designer (multi-size export)
 - **Phase 3** — ≤5s video templates (breaking/quotes/events/…) rendered with ffmpeg
 - **Phase 4** — article → video: AI script/scenes, SearxNG/stock/MRSS visuals,
   ElevenLabs TTS, Whisper captions (Hormozi style), music library, up-to-30-min renders

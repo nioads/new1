@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
         include: {
           feed: { select: { id: true, title: true, url: true } },
           category: { select: { id: true, name: true, color: true } },
+          media: true,
         },
         orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
         take: limit + 1,

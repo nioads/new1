@@ -65,6 +65,27 @@ async function pollFeed(feedId: string) {
         })),
         skipDuplicates: true,
       });
+
+      // Attach every media file found in the fresh items.
+      const created = await prisma.newsItem.findMany({
+        where: { feedId: feed.id, guid: { in: fresh.map((i) => i.guid) } },
+        select: { id: true, guid: true },
+      });
+      const idByGuid = new Map(created.map((c) => [c.guid, c.id]));
+      const mediaRows = fresh.flatMap((i) => {
+        const itemId = idByGuid.get(i.guid);
+        if (!itemId) return [];
+        return i.media.map((m) => ({
+          itemId,
+          url: m.url,
+          type: m.type,
+          mimeType: m.mimeType,
+          source: m.source,
+        }));
+      });
+      if (mediaRows.length > 0) {
+        await prisma.newsItemMedia.createMany({ data: mediaRows, skipDuplicates: true });
+      }
       console.log(`[poller] ${feed.title || feed.url}: ${fresh.length} new item(s)`);
 
       if (!feed.muted && !feed.category.muted) {

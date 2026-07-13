@@ -276,6 +276,35 @@ export function Inbox() {
             {selected.author && (
               <p className="text-xs text-slate-500">By {selected.author}</p>
             )}
+            {(selected.media?.length ?? 0) > 1 && (
+              <div>
+                <p className="text-xs text-slate-500 mb-1.5">
+                  Media in this article ({selected.media!.length})
+                </p>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {selected.media!.slice(0, 8).map((m) =>
+                    m.type === "IMAGE" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={m.id}
+                        src={m.url}
+                        alt=""
+                        title={m.source}
+                        className="aspect-square rounded-lg object-cover bg-slate-800"
+                      />
+                    ) : (
+                      <div
+                        key={m.id}
+                        title={`${m.type} — ${m.url}`}
+                        className="aspect-square rounded-lg bg-slate-800 flex items-center justify-center text-lg"
+                      >
+                        {m.type === "VIDEO" ? "🎬" : "🎵"}
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+            )}
             <p dir="auto" className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
               {selected.summary}
             </p>
@@ -296,14 +325,12 @@ export function Inbox() {
               >
                 Mark {selected.readAt ? "unread" : "read"}
               </button>
-              {/* Phase 2/3/4 entry points */}
-              <button
-                disabled
-                title="Coming in Phase 2"
-                className="rounded-lg bg-indigo-600/30 px-3 py-1.5 text-xs text-indigo-300 opacity-60 cursor-not-allowed"
+              <a
+                href={`/compose/${selected.id}`}
+                className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs text-white font-medium"
               >
                 🖼 Image post
-              </button>
+              </a>
               <button
                 disabled
                 title="Coming in Phase 3"

@@ -23,14 +23,87 @@ model User {
   pushSubscriptions PushSubscription[]
 }
 
-// Brand is minimal in Phase 1 (feeds can be associated to a brand);
-// logo/colors/fonts/storage config land in Phase 2.
-model Brand {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
+enum StorageType {
+  LOCAL
+  S3
+}
 
-  feeds Feed[]
+model Brand {
+  id             String      @id @default(cuid())
+  name           String      @unique
+  logoUrl        String      @default("")
+  primaryColor   String      @default("#4f46e5")
+  secondaryColor String      @default("#ef4444")
+  fontFamily     String      @default("")
+  // Per-brand storage backend for media and renders
+  storageType    StorageType @default(LOCAL)
+  s3Endpoint     String      @default("")
+  s3Region       String      @default("")
+  s3Bucket       String      @default("")
+  s3AccessKeyId  String      @default("")
+  s3SecretKey    String      @default("")
+  s3PublicBaseUrl String     @default("")
+  createdAt      DateTime    @default(now())
+
+  feeds     Feed[]
+  templates ImageTemplate[]
+  assets    MediaAsset[]
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+// Every media file found in an RSS item (enclosures, media:content,
+// media:thumbnail, images embedded in the content HTML).
+model NewsItemMedia {
+  id       String    @id @default(cuid())
+  itemId   String
+  item     NewsItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  url      String
+  type     MediaType
+  mimeType String    @default("")
+  source   String    @default("") // enclosure | media:content | media:thumbnail | content-html
+
+  @@unique([itemId, url])
+}
+
+// Uploaded / stored files (logos, composer uploads, renders).
+model MediaAsset {
+  id        String   @id @default(cuid())
+  brandId   String?
+  brand     Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  kind      String   @default("upload") // upload | logo | render
+  url       String
+  storageKey String  @default("")
+  mimeType  String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model ImageTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  brandId   String?
+  brand     Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants TemplateVariant[]
+}
+
+// One template has up to three linked size variants.
+model TemplateVariant {
+  id         String        @id @default(cuid())
+  templateId String
+  template   ImageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  aspect     String // "16:9" | "9:16" | "1:1"
+  width      Int
+  height     Int
+  elements   Json          @default("[]")
+
+  @@unique([templateId, aspect])
 }
 
 model Category {
@@ -84,6 +157,8 @@ model NewsItem {
   publishedAt DateTime
   fetchedAt   DateTime  @default(now())
   readAt      DateTime?
+
+  media NewsItemMedia[]
 
   @@unique([feedId, guid])
   @@index([publishedAt(sort: Desc)])

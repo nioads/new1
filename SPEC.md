@@ -40,7 +40,11 @@ Owner: Fadaat Media · Status: **v1.1 — all decisions confirmed**
   deduplicated by GUID/link/content-hash.
 - **News inbox**: reverse-chronological stream of items with filters — by feed, category,
   read/unread, date range, keyword search. Item view shows title, summary/full text,
-  media (images from `enclosure`/`media:content`), source, publish time.
+  media, source, publish time.
+- **Full media capture**: every media file in an item is scraped and stored —
+  all enclosures, all `media:content` entries, `media:thumbnail`, and images/videos
+  embedded in the content HTML — typed as image/video/audio and available to the
+  post composer (images) and the video pipeline (video/audio).
 - **Notifications**: on new item(s) → in-app toast + unread badge + Web Push
   (works with the tab closed). Per-feed and per-category notification mute controls.
 - From any inbox item, the user launches: **Image Post**, **Short Video (≤5s)**, or

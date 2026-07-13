@@ -6,7 +6,30 @@ export type CategoryDto = {
   _count?: { feeds: number; items: number };
 };
 
-export type BrandDto = { id: string; name: string };
+export type BrandDto = {
+  id: string;
+  name: string;
+  logoUrl: string;
+  primaryColor: string;
+  secondaryColor: string;
+  fontFamily: string;
+  storageType: "LOCAL" | "S3";
+  s3Endpoint: string;
+  s3Region: string;
+  s3Bucket: string;
+  s3AccessKeyId: string;
+  s3SecretKey: string;
+  s3PublicBaseUrl: string;
+  _count?: { feeds: number; templates: number };
+};
+
+export type ItemMediaDto = {
+  id: string;
+  url: string;
+  type: "IMAGE" | "VIDEO" | "AUDIO";
+  mimeType: string;
+  source: string;
+};
 
 export type FeedDto = {
   id: string;
@@ -37,8 +60,9 @@ export type NewsItemDto = {
   publishedAt: string;
   fetchedAt: string;
   readAt: string | null;
-  feed: { id: string; title: string; url?: string };
+  feed: { id: string; title: string; url?: string; brandId?: string | null };
   category: { id: string; name: string; color: string };
+  media?: ItemMediaDto[];
 };
 
 export type UserDto = {

@@ -9,6 +9,8 @@ const links = [
   { href: "/", label: "Inbox", adminOnly: false },
   { href: "/feeds", label: "Feeds", adminOnly: false },
   { href: "/categories", label: "Categories", adminOnly: false },
+  { href: "/templates", label: "Templates", adminOnly: false },
+  { href: "/brands", label: "Brands", adminOnly: true },
   { href: "/users", label: "Users", adminOnly: true },
 ];
 
