@@ -4,6 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryDto, FeedDto, NewsItemDto } from "@/lib/types";
 import { useLive } from "@/components/live";
 
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
 function timeAgo(iso: string) {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s`;
@@ -306,7 +314,13 @@ export function Inbox() {
               </div>
             )}
             <p dir="auto" className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
-              {selected.summary}
+              {(() => {
+                const full = plainText(selected.content || "");
+                const summary = plainText(selected.summary || "");
+                // show the fuller of the two (worker enrichment fills content
+                // with the complete article text)
+                return full.length > summary.length ? full : summary;
+              })()}
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
               {selected.link && (

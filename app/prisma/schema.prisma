@@ -186,6 +186,8 @@ model NewsItem {
   publishedAt DateTime
   fetchedAt   DateTime  @default(now())
   readAt      DateTime?
+  // set once the article page has been fetched and text/media extracted
+  enrichedAt  DateTime?
 
   media NewsItemMedia[]
 

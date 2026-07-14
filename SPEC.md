@@ -45,6 +45,11 @@ Owner: Fadaat Media · Status: **v1.1 — all decisions confirmed**
   all enclosures, all `media:content` entries, `media:thumbnail`, and images/videos
   embedded in the content HTML — typed as image/video/audio and available to the
   post composer (images) and the video pipeline (video/audio).
+- **Full article extraction**: the worker also visits each item's article page and
+  extracts the complete story — full text via Readability plus every image and
+  video on the page (og:image/og:video, article body media, srcset, direct media
+  links) — merged into the item and deduplicated against feed media. Runs as a
+  background queue and backfills previously ingested items automatically.
 - **Notifications**: on new item(s) → in-app toast + unread badge + Web Push
   (works with the tab closed). Per-feed and per-category notification mute controls.
 - From any inbox item, the user launches: **Image Post**, **Short Video (≤5s)**, or

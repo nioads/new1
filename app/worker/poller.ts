@@ -9,6 +9,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { fetchFeed } from "../src/lib/rss";
 import { broadcastPush } from "../src/lib/push";
 import { processNextRender } from "../src/lib/render";
+import { extractArticle } from "../src/lib/article";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -45,10 +46,32 @@ async function pollFeed(feedId: string) {
 
     const existing = await prisma.newsItem.findMany({
       where: { feedId: feed.id, guid: { in: result.items.map((i) => i.guid) } },
-      select: { guid: true },
+      select: { id: true, guid: true },
     });
     const known = new Set(existing.map((e) => e.guid));
     const fresh = result.items.filter((i) => !known.has(i.guid));
+
+    // Backfill: make sure every already-known item has its feed media rows
+    // (items ingested before media capture existed, or feeds that add media later).
+    if (existing.length > 0) {
+      const idByExistingGuid = new Map(existing.map((e) => [e.guid, e.id]));
+      const backfillRows = result.items
+        .filter((i) => known.has(i.guid))
+        .flatMap((i) => {
+          const itemId = idByExistingGuid.get(i.guid);
+          if (!itemId) return [];
+          return i.media.map((m) => ({
+            itemId,
+            url: m.url,
+            type: m.type,
+            mimeType: m.mimeType,
+            source: m.source,
+          }));
+        });
+      if (backfillRows.length > 0) {
+        await prisma.newsItemMedia.createMany({ data: backfillRows, skipDuplicates: true });
+      }
+    }
 
     if (fresh.length > 0) {
       await prisma.newsItem.createMany({
@@ -167,6 +190,80 @@ setInterval(() => {
   tick().catch((err) => console.error("[poller] tick failed:", err));
 }, TICK_MS);
 tick().catch((err) => console.error("[poller] tick failed:", err));
+
+// Article enrichment: visit each article page and pull the FULL story —
+// complete text plus every image and video on the page — since RSS
+// summaries usually carry only a fraction of it. Runs in the background
+// over any item that hasn't been enriched yet (covers old items too).
+const ENRICH_BATCH = 3;
+
+async function enrichItem(item: { id: string; link: string; content: string }) {
+  try {
+    const article = await extractArticle(item.link);
+    if (article) {
+      if (article.images.length > 0 || article.videos.length > 0) {
+        await prisma.newsItemMedia.createMany({
+          data: [
+            ...article.images.map((url) => ({
+              itemId: item.id,
+              url,
+              type: "IMAGE" as const,
+              mimeType: "",
+              source: "article-html",
+            })),
+            ...article.videos.map((url) => ({
+              itemId: item.id,
+              url,
+              type: "VIDEO" as const,
+              mimeType: "",
+              source: "article-html",
+            })),
+          ],
+          skipDuplicates: true,
+        });
+      }
+      // keep the fuller text; never downgrade to a shorter one
+      const currentLength = item.content.replace(/<[^>]*>/g, "").length;
+      const data: Record<string, unknown> = { enrichedAt: new Date() };
+      if (article.text.length > currentLength) data.content = article.text;
+      await prisma.newsItem.update({ where: { id: item.id }, data });
+      console.log(
+        `[enrich] ${item.id}: +${article.images.length} img, +${article.videos.length} vid, text ${article.text.length} chars`,
+      );
+    } else {
+      await prisma.newsItem.update({
+        where: { id: item.id },
+        data: { enrichedAt: new Date() },
+      });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[enrich] ${item.id} failed: ${message}`);
+    // mark attempted so one broken article doesn't block the queue
+    await prisma.newsItem
+      .update({ where: { id: item.id }, data: { enrichedAt: new Date() } })
+      .catch(() => {});
+  }
+}
+
+let enriching = false;
+setInterval(async () => {
+  if (enriching) return;
+  enriching = true;
+  try {
+    const pending = await prisma.newsItem.findMany({
+      where: { enrichedAt: null, NOT: { link: "" } },
+      orderBy: { fetchedAt: "desc" },
+      take: ENRICH_BATCH,
+      select: { id: true, link: true, content: true },
+    });
+    await Promise.all(pending.map(enrichItem));
+  } catch (err) {
+    console.error("[enrich] queue error:", err);
+  } finally {
+    enriching = false;
+  }
+}, 5000);
 
 // Video render queue: drain serially, checking every 3s when idle.
 let rendering = false;
