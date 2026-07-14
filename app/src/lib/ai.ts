@@ -131,6 +131,49 @@ export async function synthesizeSpeech(
   return { path: out, duration };
 }
 
+// ---------- transcription (word-level timestamps for captions) ----------
+
+import { estimateWords, type CaptionWord } from "./captions";
+
+export async function transcribeWords(
+  settings: Settings,
+  audioPath: string,
+  fallbackText: string,
+  fallbackDuration: number,
+): Promise<CaptionWord[]> {
+  if (aiMocked(settings)) {
+    return estimateWords(fallbackText, fallbackDuration);
+  }
+  try {
+    const audio = await readFile(audioPath);
+    const res = await fetch("https://fal.run/fal-ai/whisper", {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${settings.FAL_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        audio_url: `data:audio/mpeg;base64,${audio.toString("base64")}`,
+        task: "transcribe",
+        chunk_level: "word",
+      }),
+      signal: AbortSignal.timeout(300000),
+    });
+    if (!res.ok) throw new Error(`Whisper HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      chunks?: Array<{ text: string; timestamp: [number, number] }>;
+    };
+    const words = (data.chunks ?? [])
+      .map((c) => ({ w: c.text.trim(), s: c.timestamp?.[0] ?? 0, e: c.timestamp?.[1] ?? 0 }))
+      .filter((w) => w.w && w.e > w.s);
+    if (words.length === 0) throw new Error("no word chunks");
+    return words;
+  } catch (err) {
+    console.error("[whisper] falling back to estimated timings:", err);
+    return estimateWords(fallbackText, fallbackDuration);
+  }
+}
+
 // ---------- image generation ----------
 
 export async function generateImage(

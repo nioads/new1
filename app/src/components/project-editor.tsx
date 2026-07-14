@@ -29,6 +29,8 @@ type ProjectDto = {
   scriptPrompt: string;
   script: string;
   musicTrackId: string | null;
+  captionsEnabled: boolean;
+  captionStyleId: string | null;
   brandId: string | null;
   outputUrl: string;
   error: string;
@@ -46,6 +48,7 @@ function proxied(src: string): string {
 export function ProjectEditor({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [music, setMusic] = useState<MusicTrackDto[]>([]);
+  const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
   const [sceneCount, setSceneCount] = useState(6);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -60,6 +63,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   useEffect(load, [load]);
   useEffect(() => {
     fetch("/api/music").then((r) => r.json()).then(setMusic);
+    fetch("/api/captions").then((r) => r.json()).then(setCaptionStyles);
   }, []);
 
   // poll while rendering
@@ -90,6 +94,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         script: project.script,
         scriptPrompt: project.scriptPrompt,
         musicTrackId: project.musicTrackId,
+        captionsEnabled: project.captionsEnabled,
+        captionStyleId: project.captionStyleId,
         scenes: project.scenes.map((s) => ({
           id: s.id,
           text: s.text,
@@ -171,6 +177,33 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </option>
           ))}
         </select>
+        <label
+          className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs text-slate-300 cursor-pointer"
+          title="Burn captions into the video"
+        >
+          <input
+            type="checkbox"
+            checked={project.captionsEnabled}
+            onChange={(e) => setProject({ ...project, captionsEnabled: e.target.checked })}
+            className="accent-indigo-600"
+          />
+          Captions
+        </label>
+        {project.captionsEnabled && (
+          <select
+            value={project.captionStyleId ?? ""}
+            onChange={(e) => setProject({ ...project, captionStyleId: e.target.value || null })}
+            className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs"
+            title="Caption style (manage in Settings)"
+          >
+            <option value="">Hormozi (default)</option>
+            {captionStyles.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={() => save()}
           className="rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-sm"

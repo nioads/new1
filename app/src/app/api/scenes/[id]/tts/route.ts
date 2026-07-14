@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api";
 import { getSettings } from "@/lib/settings";
-import { synthesizeSpeech } from "@/lib/ai";
+import { synthesizeSpeech, transcribeWords } from "@/lib/ai";
 import { storeFile } from "@/lib/storage";
 import { readFile, rm } from "fs/promises";
 
@@ -23,6 +23,8 @@ export async function POST(
 
     const settings = await getSettings(prisma);
     const speech = await synthesizeSpeech(settings, scene.text);
+    // word-level timestamps for burned-in captions
+    const words = await transcribeWords(settings, speech.path, scene.text, speech.duration);
     const buffer = await readFile(speech.path);
     await rm(speech.path, { force: true }).catch(() => {});
     const brand = scene.project.brandId
@@ -36,6 +38,7 @@ export async function POST(
         ttsUrl: stored.url,
         ttsDuration: speech.duration,
         durationSec: Math.max(1.5, speech.duration + 0.6),
+        words: JSON.parse(JSON.stringify(words)),
       },
     });
     return NextResponse.json(updated);

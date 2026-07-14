@@ -41,6 +41,8 @@ const patchSchema = z.object({
   script: z.string().optional(),
   scriptPrompt: z.string().optional(),
   musicTrackId: z.string().nullable().optional(),
+  captionsEnabled: z.boolean().optional(),
+  captionStyleId: z.string().nullable().optional(),
   aspect: z.enum(["16:9", "9:16"]).optional(),
   brandId: z.string().nullable().optional(),
   scenes: z.array(sceneSchema).optional(),
@@ -60,6 +62,8 @@ export async function PATCH(
     if (body.script !== undefined) data.script = body.script;
     if (body.scriptPrompt !== undefined) data.scriptPrompt = body.scriptPrompt;
     if (body.musicTrackId !== undefined) data.musicTrackId = body.musicTrackId;
+    if (body.captionsEnabled !== undefined) data.captionsEnabled = body.captionsEnabled;
+    if (body.captionStyleId !== undefined) data.captionStyleId = body.captionStyleId;
     if (body.brandId !== undefined) data.brandId = body.brandId;
     if (body.aspect !== undefined) {
       data.aspect = body.aspect;

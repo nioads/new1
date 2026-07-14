@@ -20,6 +20,8 @@ export type BrandDto = {
   s3AccessKeyId: string;
   s3SecretKey: string;
   s3PublicBaseUrl: string;
+  introUrl: string;
+  outroUrl: string;
   _count?: { feeds: number; templates: number };
 };
 

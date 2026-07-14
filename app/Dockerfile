@@ -1,5 +1,6 @@
 FROM node:22-alpine AS base
-RUN apk add --no-cache openssl ffmpeg
+# ffmpeg (renders), fonts with Arabic coverage (burned-in captions via libass)
+RUN apk add --no-cache openssl ffmpeg fontconfig font-noto font-noto-arabic ttf-dejavu
 WORKDIR /app
 
 FROM base AS deps

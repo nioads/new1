@@ -17,6 +17,8 @@ const patchSchema = z.object({
   s3AccessKeyId: z.string().optional(),
   s3SecretKey: z.string().optional(),
   s3PublicBaseUrl: z.string().optional(),
+  introUrl: z.string().optional(),
+  outroUrl: z.string().optional(),
 });
 
 export async function PATCH(

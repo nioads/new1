@@ -37,7 +37,22 @@ async function main() {
     });
   }
 
-  console.log(`Seeded admin user ${adminEmail} and ${defaults.length} categories.`);
+  const { BUILTIN_CAPTION_STYLES } = await import("../src/lib/captions");
+  for (const preset of BUILTIN_CAPTION_STYLES) {
+    await prisma.captionStyle.upsert({
+      where: { name: preset.name },
+      update: {},
+      create: {
+        name: preset.name,
+        style: JSON.parse(JSON.stringify(preset.style)),
+        builtin: true,
+      },
+    });
+  }
+
+  console.log(
+    `Seeded admin user ${adminEmail}, ${defaults.length} categories, ${BUILTIN_CAPTION_STYLES.length} caption styles.`,
+  );
 }
 
 main().finally(() => prisma.$disconnect());

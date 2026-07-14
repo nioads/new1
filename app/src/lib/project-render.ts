@@ -3,13 +3,21 @@
 // transitions and an optional looping music bed. Scene-chunked so long
 // videos stay tractable.
 import { spawn } from "child_process";
-import { mkdir, readFile, rm } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import type { PrismaClient, Scene } from "../generated/prisma/client";
 import { mediaDir, storeFile } from "./storage";
 import { resolveToLocalFile } from "./media-path";
-import { generateImage } from "./ai";
+import { generateImage, ffprobeDuration } from "./ai";
 import { getSettings } from "./settings";
+import {
+  buildAss,
+  estimateWords,
+  BUILTIN_CAPTION_STYLES,
+  type CaptionStyleSpec,
+  type CaptionWord,
+  type SceneCaption,
+} from "./captions";
 
 const FFMPEG = () => process.env.FFMPEG_PATH ?? "ffmpeg";
 const FPS = 25;
@@ -107,6 +115,39 @@ async function renderSceneSegment(opts: {
   return duration;
 }
 
+// Normalizes a brand intro/outro clip to the project's size/codec so it can
+// be concatenated with scene segments.
+async function normalizeClip(
+  srcPath: string,
+  width: number,
+  height: number,
+  outPath: string,
+): Promise<number> {
+  const probe = await new Promise<string>((resolve) => {
+    const p = spawn(process.env.FFPROBE_PATH ?? "ffprobe", [
+      "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", srcPath,
+    ]);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => resolve(out.trim()));
+    p.on("error", () => resolve(""));
+  });
+  const hasAudio = probe.includes("audio");
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", srcPath];
+  if (!hasAudio) args.push("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo");
+  args.push(
+    "-filter_complex",
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${FPS},setsar=1[v];[${hasAudio ? "0:a" : "1:a"}]aresample=44100[a]`,
+    "-map", "[v]", "-map", "[a]",
+    ...(hasAudio ? [] : ["-shortest"]),
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+    outPath,
+  );
+  await run(args);
+  return ffprobeDuration(outPath);
+}
+
 export async function processNextProject(prisma: PrismaClient): Promise<boolean> {
   const job = await prisma.videoProject.findFirst({
     where: { status: "QUEUED" },
@@ -131,9 +172,25 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     if (scenes.length === 0) throw new Error("Project has no scenes");
     await mkdir(workDir, { recursive: true });
 
-    // 1. render each scene to a uniform segment
+    const brand = job.brandId
+      ? await prisma.brand.findUnique({ where: { id: job.brandId } })
+      : null;
+
+    // 0. brand intro (prepended before scenes)
     const segments: string[] = [];
     let total = 0;
+    let captionOffset = 0;
+    if (brand?.introUrl) {
+      const src = await resolveToLocalFile(brand.introUrl, `project-tmp/${job.id}`);
+      const introPath = path.join(workDir, "intro.mp4");
+      const d = await normalizeClip(src.path, job.width, job.height, introPath);
+      segments.push(introPath);
+      total += d;
+      captionOffset = d;
+    }
+
+    // 1. render each scene to a uniform segment
+    const sceneCaptions: SceneCaption[] = [];
     for (const [i, scene] of scenes.entries()) {
       let imagePath: string | null = null;
       let isVideoVisual = false;
@@ -158,7 +215,7 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
         ttsPath = (await resolveToLocalFile(scene.ttsUrl, `project-tmp/${job.id}`)).path;
       }
       const segPath = path.join(workDir, `seg-${String(i).padStart(3, "0")}.mp4`);
-      total += await renderSceneSegment({
+      const segDuration = await renderSceneSegment({
         scene,
         imagePath,
         ttsPath,
@@ -167,8 +224,25 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
         outPath: segPath,
         isVideoVisual,
       });
+      // caption timings: scene audio starts at the segment start
+      if (scene.text.trim()) {
+        const words =
+          (scene.words as CaptionWord[] | null) ??
+          estimateWords(scene.text, Math.max(1, segDuration - 0.6));
+        sceneCaptions.push({ offset: captionOffset, words });
+      }
+      captionOffset += segDuration;
+      total += segDuration;
       segments.push(segPath);
       console.log(`[project] ${job.id} scene ${i + 1}/${scenes.length} rendered`);
+    }
+
+    // 1b. brand outro (appended after scenes)
+    if (brand?.outroUrl) {
+      const src = await resolveToLocalFile(brand.outroUrl, `project-tmp/${job.id}`);
+      const outroPath = path.join(workDir, "outro.mp4");
+      total += await normalizeClip(src.path, job.width, job.height, outroPath);
+      segments.push(outroPath);
     }
 
     // 2. concatenate + optional music bed
@@ -183,8 +257,44 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     }
     if (musicPath) args.push("-stream_loop", "-1", "-i", musicPath);
 
+    let extraInputs = musicPath ? 1 : 0;
+
+    // brand logo watermark
+    let logoPath: string | null = null;
+    if (brand?.logoUrl) {
+      logoPath = (await resolveToLocalFile(brand.logoUrl, `project-tmp/${job.id}`)).path;
+      args.push("-i", logoPath);
+      extraInputs++;
+    }
+
+    // burned-in captions (per-project toggle + selectable style)
+    let assPath: string | null = null;
+    if (job.captionsEnabled && sceneCaptions.length > 0) {
+      let spec: CaptionStyleSpec = BUILTIN_CAPTION_STYLES[0].style;
+      if (job.captionStyleId) {
+        const style = await prisma.captionStyle.findUnique({ where: { id: job.captionStyleId } });
+        if (style) spec = style.style as unknown as CaptionStyleSpec;
+      }
+      assPath = path.join(workDir, "captions.ass");
+      await writeFile(assPath, buildAss(sceneCaptions, spec, job.width, job.height));
+    }
+
     const pairs = segments.map((_, i) => `[${i}:v][${i}:a]`).join("");
-    let filter = `${pairs}concat=n=${segments.length}:v=1:a=1[v][na]`;
+    let filter = `${pairs}concat=n=${segments.length}:v=1:a=1[cv][na]`;
+    let vLabel = "cv";
+    if (logoPath) {
+      const logoIdx = segments.length + (musicPath ? 1 : 0);
+      const logoW = Math.round(job.width * 0.12);
+      filter += `;[${logoIdx}:v]scale=${logoW}:-1[lg];[${vLabel}][lg]overlay=W-w-${Math.round(job.width * 0.03)}:${Math.round(job.width * 0.03)}[lv]`;
+      vLabel = "lv";
+    }
+    if (assPath) {
+      const escaped = assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+      filter += `;[${vLabel}]subtitles='${escaped}'[sv]`;
+      vLabel = "sv";
+    }
+    filter += `;[${vLabel}]null[v]`;
+    void extraInputs;
     if (musicPath) {
       const fadeStart = Math.max(0, total - 2).toFixed(2);
       filter += `;[${segments.length}:a]volume=0.22[mq];[na][mq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=2[a]`;
@@ -203,7 +313,6 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     await run(args, 20 * 60 * 1000);
 
     const buffer = await readFile(outPath);
-    const brand = job.brandId ? await prisma.brand.findUnique({ where: { id: job.brandId } }) : null;
     const stored = await storeFile(brand, buffer, `project-${job.id}.mp4`, "video/mp4");
     await prisma.mediaAsset.create({
       data: {

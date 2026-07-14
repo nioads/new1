@@ -97,9 +97,18 @@ npm run worker     # feed poller (separate terminal)
 | `POLL_INTERVAL_MS` | Feed polling interval (default 30000) |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Initial admin account |
 
-## Roadmap (Phase 4 remaining)
+### Captions & branding on article→video
 
-- Whisper word-level captions (Hormozi style, any language)
-- Brand intro/outro clips and logo watermark on article→video renders
+- **Captions** are burned in with ffmpeg/libass from **word-level timestamps**
+  (fal Whisper when a key is set; estimated timings in mock mode). Per-project
+  **on/off toggle** and style selector; styles (font size, colors, active-word
+  highlight, outline, words-per-group, position, bold/uppercase) are fully
+  **manageable in Settings** with live preview — Hormozi, Clean, and Minimal
+  ship built-in. Arabic/RTL shaping handled natively by libass.
+- **Brand intro/outro clips** (uploaded per brand) are prepended/appended to
+  renders, and the **brand logo** is watermarked on the video.
+
+## Roadmap
+
 - AI scene animation (fal image-to-video) as an alternative to Ken Burns
 - MRSS feeds as scene-footage sources; crop/position editor for scene images

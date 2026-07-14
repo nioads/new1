@@ -3,6 +3,71 @@
 import { useEffect, useRef, useState } from "react";
 import type { BrandDto } from "@/lib/types";
 
+function VideoSlot({
+  label,
+  url,
+  brandId,
+  onChange,
+}: {
+  label: string;
+  url: string;
+  brandId: string;
+  onChange: (url: string) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function upload(file: File) {
+    setBusy(true);
+    const form = new FormData();
+    form.append("file", file);
+    form.append("brandId", brandId);
+    form.append("kind", label.toLowerCase().includes("intro") ? "intro" : "outro");
+    const res = await fetch("/api/uploads", { method: "POST", body: form });
+    setBusy(false);
+    if (res.ok) onChange((await res.json()).url);
+  }
+
+  return (
+    <div className="rounded-lg bg-slate-800/60 border border-slate-700 p-2 space-y-1.5">
+      <p className="text-[11px] text-slate-400">{label}</p>
+      {url ? (
+        <video src={url} controls preload="metadata" className="w-full max-h-24 rounded" />
+      ) : (
+        <p className="text-[11px] text-slate-600">none</p>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={() => ref.current?.click()}
+          disabled={busy}
+          className="rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50 px-2 py-1 text-[11px]"
+        >
+          {busy ? "Uploading…" : url ? "Replace" : "Upload video"}
+        </button>
+        {url && (
+          <button
+            onClick={() => onChange("")}
+            className="text-[11px] text-slate-500 hover:text-red-400"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <input
+        ref={ref}
+        type="file"
+        accept="video/*"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) upload(f);
+          e.target.value = "";
+        }}
+      />
+    </div>
+  );
+}
+
 export function Brands() {
   const [brands, setBrands] = useState<BrandDto[]>([]);
   const [name, setName] = useState("");
@@ -58,6 +123,8 @@ export function Brands() {
         s3AccessKeyId: selected.s3AccessKeyId,
         s3SecretKey: selected.s3SecretKey,
         s3PublicBaseUrl: selected.s3PublicBaseUrl,
+        introUrl: selected.introUrl,
+        outroUrl: selected.outroUrl,
       }),
     });
     if (res.ok) setSavedAt(Date.now());
@@ -230,6 +297,23 @@ export function Brands() {
                   className={inputCls}
                 />
               </label>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <p className="text-xs text-slate-400">
+                Video intro / outro (prepended &amp; appended to article→video renders)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(["introUrl", "outroUrl"] as const).map((field) => (
+                  <VideoSlot
+                    key={field}
+                    label={field === "introUrl" ? "Intro clip" : "Outro clip"}
+                    url={selected[field]}
+                    brandId={selected.id}
+                    onChange={(url) => patchBrand({ [field]: url })}
+                  />
+                ))}
+              </div>
             </div>
 
             <div className="pt-2 border-t border-slate-800 space-y-3">
