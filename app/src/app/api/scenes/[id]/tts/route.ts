@@ -22,7 +22,9 @@ export async function POST(
     }
 
     const settings = await getSettings(prisma);
-    const speech = await synthesizeSpeech(settings, scene.text);
+    // voice priority: scene override → project default → settings default
+    const voice = scene.voiceId || scene.project.voiceId || undefined;
+    const speech = await synthesizeSpeech(settings, scene.text, voice);
     // word-level timestamps for burned-in captions
     const words = await transcribeWords(settings, speech.path, scene.text, speech.duration);
     const buffer = await readFile(speech.path);

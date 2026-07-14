@@ -249,6 +249,8 @@ model VideoProject {
   scriptPrompt String        @default("")
   script       String        @default("")
   musicTrackId String?
+  // default ElevenLabs voice for all scenes (scenes can override)
+  voiceId      String        @default("")
   captionsEnabled Boolean    @default(true)
   captionStyleId  String?
   outputUrl    String        @default("")
@@ -272,6 +274,8 @@ model Scene {
   imagePrompt String       @default("") // AI generation prompt used/editable
   ttsUrl      String       @default("")
   ttsDuration Float        @default(0)
+  // per-scene voice override (empty = project voice)
+  voiceId     String       @default("")
   kenburns    String       @default("in") // in | out | left | right | none
   transition  String       @default("fade") // fade | cut (to next scene)
   durationSec Float        @default(4)

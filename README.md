@@ -97,6 +97,14 @@ npm run worker     # feed poller (separate terminal)
 | `POLL_INTERVAL_MS` | Feed polling interval (default 30000) |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Initial admin account |
 
+### Voices (ElevenLabs)
+
+- The voice picker lists the **voices from your ElevenLabs account** (mock
+  voices without a key). Each article→video project has a **default voice**,
+  and **every scene can override it** — one video can mix multiple narrators.
+- Short video posts (≤5s) support a **spoken headline voiceover** with its own
+  voice selection, mixed over ducked background music.
+
 ### Captions & branding on article→video
 
 - **Captions** are burned in with ffmpeg/libass from **word-level timestamps**

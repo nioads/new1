@@ -17,6 +17,7 @@ export type RenderParams = {
   kenburns: KenBurns;
   textAnim: TextAnim;
   music?: { url?: string; path?: string };
+  voice?: { url?: string; path?: string }; // spoken headline / VO
 };
 
 const FFMPEG = () => process.env.FFMPEG_PATH ?? "ffmpeg";
@@ -92,16 +93,35 @@ export function buildFfmpegArgs(p: RenderParams, outPath: string): string[] {
 
   let filter = `[0:v]${bgFilter}[bg];[1:v]${anim.filter}[ov];[bg][ov]${anim.overlay}[out]`;
   const maps: string[] = ["-map", "[out]"];
+  const fadeStart = Math.max(0, p.duration - 1).toFixed(2);
+
+  let musicIdx = -1;
+  let voiceIdx = -1;
+  let next = 2;
   if (p.music?.path) {
     args.push("-stream_loop", "-1", "-i", p.music.path);
-    const fadeStart = Math.max(0, p.duration - 1).toFixed(2);
-    filter += `;[2:a]volume=0.35,afade=t=out:st=${fadeStart}:d=1[aout]`;
+    musicIdx = next++;
+  }
+  if (p.voice?.path) {
+    args.push("-i", p.voice.path);
+    voiceIdx = next++;
+  }
+
+  if (musicIdx >= 0 && voiceIdx >= 0) {
+    // voiceover over ducked music
+    filter += `;[${musicIdx}:a]volume=0.18[mq];[${voiceIdx}:a]apad[vq];[mq][vq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=1[aout]`;
+    maps.push("-map", "[aout]");
+  } else if (musicIdx >= 0) {
+    filter += `;[${musicIdx}:a]volume=0.35,afade=t=out:st=${fadeStart}:d=1[aout]`;
+    maps.push("-map", "[aout]");
+  } else if (voiceIdx >= 0) {
+    filter += `;[${voiceIdx}:a]apad[aout]`;
     maps.push("-map", "[aout]");
   }
 
   args.push("-filter_complex", filter, ...maps, "-t", String(p.duration), "-r", String(p.fps));
   args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
-  if (p.music?.path) args.push("-c:a", "aac", "-ar", "44100", "-ac", "2");
+  if (musicIdx >= 0 || voiceIdx >= 0) args.push("-c:a", "aac", "-ar", "44100", "-ac", "2");
   else args.push("-an");
   args.push("-movflags", "+faststart", outPath);
   return args;
@@ -172,6 +192,12 @@ export async function processNextRender(prisma: PrismaClient): Promise<boolean> 
       const { resolveToLocalFile } = await import("./media-path");
       const resolved = await resolveToLocalFile(params.music.url);
       params.music.path = resolved.path;
+      if (resolved.temp) cleanup.push(resolved.path);
+    }
+    if (params.voice?.url && !params.voice.path) {
+      const { resolveToLocalFile } = await import("./media-path");
+      const resolved = await resolveToLocalFile(params.voice.url);
+      params.voice.path = resolved.path;
       if (resolved.temp) cleanup.push(resolved.path);
     }
 

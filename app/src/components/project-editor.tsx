@@ -16,10 +16,13 @@ type SceneDto = {
   imagePrompt: string;
   ttsUrl: string;
   ttsDuration: number;
+  voiceId: string;
   kenburns: string;
   transition: string;
   durationSec: number;
 };
+
+type VoiceDto = { id: string; name: string; previewUrl: string; labels: string };
 
 type ProjectDto = {
   id: string;
@@ -31,6 +34,7 @@ type ProjectDto = {
   scriptPrompt: string;
   script: string;
   musicTrackId: string | null;
+  voiceId: string;
   captionsEnabled: boolean;
   captionStyleId: string | null;
   brandId: string | null;
@@ -51,6 +55,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [music, setMusic] = useState<MusicTrackDto[]>([]);
   const [brands, setBrands] = useState<BrandDto[]>([]);
+  const [voices, setVoices] = useState<VoiceDto[]>([]);
   const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
   const [sceneCount, setSceneCount] = useState(6);
   const [generating, setGenerating] = useState(false);
@@ -67,6 +72,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   useEffect(() => {
     fetch("/api/music").then((r) => r.json()).then(setMusic);
     fetch("/api/brands").then((r) => r.json()).then(setBrands);
+    fetch("/api/voices")
+      .then((r) => r.json())
+      .then((v) => setVoices(Array.isArray(v) ? v : []));
     fetch("/api/captions").then((r) => r.json()).then(setCaptionStyles);
   }, []);
 
@@ -98,6 +106,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         script: project.script,
         scriptPrompt: project.scriptPrompt,
         musicTrackId: project.musicTrackId,
+        voiceId: project.voiceId,
         brandId: project.brandId,
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
@@ -109,6 +118,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           imagePrompt: s.imagePrompt,
           kenburns: s.kenburns,
           transition: s.transition,
+          voiceId: s.voiceId,
           durationSec: s.durationSec,
         })),
         ...extra,
@@ -204,6 +214,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           {brands.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={project.voiceId}
+          onChange={(e) => setProject({ ...project, voiceId: e.target.value })}
+          className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs max-w-40"
+          title="Default narration voice (scenes can override)"
+        >
+          <option value="">Default voice</option>
+          {voices.map((v) => (
+            <option key={v.id} value={v.id}>
+              🎙 {v.name}
             </option>
           ))}
         </select>
@@ -398,6 +421,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   {scene.ttsUrl && (
                     <audio controls preload="none" src={scene.ttsUrl} className="h-7" />
                   )}
+                  <select
+                    value={scene.voiceId}
+                    onChange={(e) => patchLocalScene(scene.id, { voiceId: e.target.value })}
+                    className="rounded bg-slate-800 border border-slate-700 px-1 py-0.5 text-[11px] max-w-32"
+                    title="Voice for this scene"
+                  >
+                    <option value="">Project voice</option>
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
                   <div className="ml-auto flex items-center gap-1">
                     <button
                       onClick={() => moveScene(scene.id, "up")}

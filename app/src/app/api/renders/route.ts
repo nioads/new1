@@ -6,6 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api";
 import { renderTmpDir, writeDataUrl } from "@/lib/render";
+import { getSettings } from "@/lib/settings";
+import { synthesizeSpeech } from "@/lib/ai";
+import { rename } from "fs/promises";
 
 const createSchema = z.object({
   itemId: z.string().optional(),
@@ -23,6 +26,9 @@ const createSchema = z.object({
   kenburns: z.enum(["in", "out", "left", "right", "none"]).default("in"),
   textAnim: z.enum(["fade", "slideup", "none"]).default("slideup"),
   musicTrackId: z.string().optional(),
+  // spoken voiceover for the post (e.g. the headline)
+  voiceText: z.string().max(600).optional(),
+  voiceId: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -50,6 +56,14 @@ export async function POST(req: NextRequest) {
       musicUrl = track?.url;
     }
 
+    let voicePath: string | undefined;
+    if (body.voiceText?.trim()) {
+      const settings = await getSettings(prisma);
+      const speech = await synthesizeSpeech(settings, body.voiceText.trim(), body.voiceId);
+      voicePath = path.join(renderTmpDir(), `${stamp}-voice.mp3`);
+      await rename(speech.path, voicePath);
+    }
+
     const render = await prisma.videoRender.create({
       data: {
         aspect: body.aspect,
@@ -66,6 +80,7 @@ export async function POST(req: NextRequest) {
           kenburns: body.kenburns,
           textAnim: body.textAnim,
           ...(musicUrl ? { music: { url: musicUrl } } : {}),
+          ...(voicePath ? { voice: { path: voicePath } } : {}),
         },
       },
     });

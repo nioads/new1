@@ -46,6 +46,9 @@ export function Composer({ itemId }: { itemId: string }) {
   const [renders, setRenders] = useState<RenderDto[]>([]);
   const [music, setMusic] = useState<Array<{ id: string; name: string }>>([]);
   const [musicTrackId, setMusicTrackId] = useState("");
+  const [voices, setVoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceId, setVoiceId] = useState("");
   const stageRef = useRef<Konva.Stage>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -69,6 +72,9 @@ export function Composer({ itemId }: { itemId: string }) {
       });
     fetch("/api/brands").then((r) => r.json()).then(setBrands);
     fetch("/api/music").then((r) => r.json()).then(setMusic);
+    fetch("/api/voices")
+      .then((r) => r.json())
+      .then((v) => setVoices(Array.isArray(v) ? v : []));
   }, [itemId]);
 
   const template = templates.find((t) => t.id === templateId) ?? null;
@@ -177,6 +183,9 @@ export function Composer({ itemId }: { itemId: string }) {
           kenburns: motion.kenburns,
           textAnim: motion.textAnim,
           musicTrackId: musicTrackId || undefined,
+          ...(voiceEnabled && headline.trim()
+            ? { voiceText: headline.trim(), voiceId: voiceId || undefined }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -482,6 +491,32 @@ export function Composer({ itemId }: { itemId: string }) {
                   <option value="none">Still</option>
                 </select>
               </label>
+              <label className="col-span-2 flex items-center gap-1.5 text-[11px] text-slate-400 pt-1">
+                <input
+                  type="checkbox"
+                  checked={voiceEnabled}
+                  onChange={(e) => setVoiceEnabled(e.target.checked)}
+                  className="accent-indigo-600"
+                />
+                🎙 Speak headline (voiceover)
+              </label>
+              {voiceEnabled && (
+                <label className="col-span-2 block text-[11px] text-slate-500">
+                  Voice
+                  <select
+                    value={voiceId}
+                    onChange={(e) => setVoiceId(e.target.value)}
+                    className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                  >
+                    <option value="">Default voice</option>
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="col-span-2 block text-[11px] text-slate-500">
                 Music
                 <select

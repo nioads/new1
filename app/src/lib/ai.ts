@@ -89,22 +89,58 @@ export async function ffprobeDuration(filePath: string): Promise<number> {
   });
 }
 
+export type VoiceInfo = { id: string; name: string; previewUrl: string; labels: string };
+
+// Lists available ElevenLabs voices (distinct mock voices without a key so
+// multi-voice flows stay testable).
+export async function listVoices(settings: Settings): Promise<VoiceInfo[]> {
+  if (ttsMocked(settings)) {
+    return [
+      { id: "mock-low", name: "Mock — Deep (no key)", previewUrl: "", labels: "mock" },
+      { id: "mock-mid", name: "Mock — Neutral (no key)", previewUrl: "", labels: "mock" },
+      { id: "mock-high", name: "Mock — Bright (no key)", previewUrl: "", labels: "mock" },
+    ];
+  }
+  const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+    headers: { "xi-api-key": settings.ELEVENLABS_KEY },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`Voices HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = (await res.json()) as {
+    voices?: Array<{
+      voice_id: string;
+      name: string;
+      preview_url?: string;
+      labels?: Record<string, string>;
+    }>;
+  };
+  return (data.voices ?? []).map((v) => ({
+    id: v.voice_id,
+    name: v.name,
+    previewUrl: v.preview_url ?? "",
+    labels: Object.values(v.labels ?? {}).join(", "),
+  }));
+}
+
 // Generates narration audio for one scene; returns a local temp file path.
 export async function synthesizeSpeech(
   settings: Settings,
   text: string,
+  voiceId?: string,
 ): Promise<{ path: string; duration: number }> {
   const dir = path.join(mediaDir(), "tts-tmp");
   await mkdir(dir, { recursive: true });
   const out = path.join(dir, `${crypto.randomBytes(6).toString("hex")}.mp3`);
+  const voice = voiceId || settings.TTS_VOICE_ID;
 
   if (ttsMocked(settings)) {
-    // mock: quiet tone whose length approximates natural speech pace
+    // mock: quiet tone; pitch varies by voice so multi-voice is audible
     const words = text.trim().split(/\s+/).length;
     const duration = Math.min(30, Math.max(2, words / 2.4));
+    const freq = 300 + (Math.abs([...voice].reduce((a, c) => a + c.charCodeAt(0), 0)) % 400);
     await run(process.env.FFMPEG_PATH ?? "ffmpeg", [
       "-y", "-hide_banner", "-loglevel", "error",
-      "-f", "lavfi", "-i", `sine=frequency=440:duration=${duration.toFixed(2)}`,
+      "-f", "lavfi", "-i", `sine=frequency=${freq}:duration=${duration.toFixed(2)}`,
       "-af", "volume=0.08",
       "-c:a", "libmp3lame", "-q:a", "6", out,
     ]);
@@ -112,7 +148,7 @@ export async function synthesizeSpeech(
   }
 
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${settings.TTS_VOICE_ID}?output_format=mp3_44100_128`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`,
     {
       method: "POST",
       headers: {
