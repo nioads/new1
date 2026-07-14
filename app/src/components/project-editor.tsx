@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { NewsItemDto } from "@/lib/types";
+import type { BrandDto, NewsItemDto } from "@/lib/types";
 import type { MusicTrackDto } from "@/components/music";
+
+const VIDEO_URL = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
 
 type SceneDto = {
   id: string;
@@ -48,6 +50,7 @@ function proxied(src: string): string {
 export function ProjectEditor({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [music, setMusic] = useState<MusicTrackDto[]>([]);
+  const [brands, setBrands] = useState<BrandDto[]>([]);
   const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
   const [sceneCount, setSceneCount] = useState(6);
   const [generating, setGenerating] = useState(false);
@@ -63,6 +66,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   useEffect(load, [load]);
   useEffect(() => {
     fetch("/api/music").then((r) => r.json()).then(setMusic);
+    fetch("/api/brands").then((r) => r.json()).then(setBrands);
     fetch("/api/captions").then((r) => r.json()).then(setCaptionStyles);
   }, []);
 
@@ -94,6 +98,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         script: project.script,
         scriptPrompt: project.scriptPrompt,
         musicTrackId: project.musicTrackId,
+        brandId: project.brandId,
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
         scenes: project.scenes.map((s) => ({
@@ -149,6 +154,32 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     await save({ queueRender: true });
   }
 
+  async function addScene(afterOrder: number) {
+    await save();
+    const res = await fetch(`/api/projects/${projectId}/scenes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ afterOrder }),
+    });
+    if (res.ok) load();
+  }
+
+  async function deleteScene(sceneId: string) {
+    if (!confirm("Remove this scene?")) return;
+    const res = await fetch(`/api/scenes/${sceneId}`, { method: "DELETE" });
+    if (res.ok) load();
+  }
+
+  async function moveScene(sceneId: string, dir: "up" | "down") {
+    await save();
+    const res = await fetch(`/api/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ move: dir }),
+    });
+    if (res.ok) load();
+  }
+
   if (!project) return <div className="p-10 text-slate-500 text-sm">Loading project…</div>;
 
   const rendering = project.status === "QUEUED" || project.status === "RENDERING";
@@ -163,6 +194,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           {project.title}
         </p>
         <span className="text-xs text-slate-500">{project.aspect}</span>
+        <select
+          value={project.brandId ?? ""}
+          onChange={(e) => setProject({ ...project, brandId: e.target.value || null })}
+          className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs max-w-40"
+          title="Brand — its intro/outro and logo are applied to the render"
+        >
+          <option value="">No brand</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
         <select
           value={project.musicTrackId ?? ""}
           onChange={(e) =>
@@ -283,10 +327,22 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               <div className="w-44 shrink-0 space-y-2">
                 <button
                   onClick={() => setPickerScene(pickerScene === scene.id ? null : scene.id)}
-                  className="block w-full aspect-video rounded-lg overflow-hidden border border-slate-700 hover:border-indigo-500 bg-slate-800"
+                  className="block w-full aspect-video rounded-lg overflow-hidden border border-slate-700 hover:border-indigo-500 bg-slate-800 relative"
                   title="Change visual"
                 >
-                  {scene.imageUrl ? (
+                  {scene.imageUrl && VIDEO_URL.test(scene.imageUrl) ? (
+                    <>
+                      <video
+                        src={proxied(scene.imageUrl)}
+                        muted
+                        preload="metadata"
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute bottom-1 right-1 text-[10px] bg-black/70 rounded px-1">
+                        🎬 video
+                      </span>
+                    </>
+                  ) : scene.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={proxied(scene.imageUrl)} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -319,19 +375,61 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               </div>
 
               <div className="flex-1 min-w-64 space-y-2">
-                <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
                   <span className="rounded bg-slate-800 px-1.5 py-0.5">#{i + 1}</span>
-                  <span>{scene.durationSec.toFixed(1)}s</span>
+                  {scene.ttsUrl ? (
+                    <span>{scene.durationSec.toFixed(1)}s (voiceover)</span>
+                  ) : (
+                    <label title="Scene duration (no voiceover)">
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        step={0.5}
+                        value={scene.durationSec}
+                        onChange={(e) =>
+                          patchLocalScene(scene.id, { durationSec: Number(e.target.value) })
+                        }
+                        className="w-14 rounded bg-slate-800 border border-slate-700 px-1 py-0.5 text-[11px]"
+                      />
+                      s
+                    </label>
+                  )}
                   {scene.ttsUrl && (
                     <audio controls preload="none" src={scene.ttsUrl} className="h-7" />
                   )}
-                  <button
-                    onClick={() => generateTts(scene.id)}
-                    disabled={busyScene === scene.id}
-                    className="ml-auto rounded-lg bg-indigo-600/80 hover:bg-indigo-500 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-white"
-                  >
-                    {busyScene === scene.id ? "…" : scene.ttsUrl ? "↻ Voiceover" : "🎙 Voiceover"}
-                  </button>
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => moveScene(scene.id, "up")}
+                      disabled={i === 0}
+                      title="Move up"
+                      className="rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 px-1.5 py-1"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={() => moveScene(scene.id, "down")}
+                      disabled={i === project.scenes.length - 1}
+                      title="Move down"
+                      className="rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 px-1.5 py-1"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      onClick={() => deleteScene(scene.id)}
+                      title="Remove scene"
+                      className="rounded bg-red-900/40 text-red-300 hover:bg-red-900/70 px-1.5 py-1"
+                    >
+                      ✕
+                    </button>
+                    <button
+                      onClick={() => generateTts(scene.id)}
+                      disabled={busyScene === scene.id}
+                      className="rounded-lg bg-indigo-600/80 hover:bg-indigo-500 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-white"
+                    >
+                      {busyScene === scene.id ? "…" : scene.ttsUrl ? "↻ Voiceover" : "🎙 Voiceover"}
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   dir="auto"
@@ -355,7 +453,21 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               </div>
             </div>
           ))}
+          <button
+            onClick={() => addScene(-1)}
+            className="w-full rounded-xl border border-dashed border-slate-700 hover:border-indigo-500 py-2.5 text-sm text-slate-400 hover:text-indigo-300"
+          >
+            + Add scene
+          </button>
         </div>
+      )}
+      {project.scenes.length === 0 && (
+        <button
+          onClick={() => addScene(-1)}
+          className="w-full max-w-md rounded-xl border border-dashed border-slate-700 hover:border-indigo-500 py-2.5 text-sm text-slate-400 hover:text-indigo-300"
+        >
+          + Add scene manually (or generate a script above)
+        </button>
       )}
     </div>
   );
@@ -401,11 +513,11 @@ function ScenePicker({
     else setErr((await res.json()).error ?? "Search failed");
   }
 
-  async function genImage() {
+  async function generate(kind: "image" | "video") {
     setBusy(true);
     setErr("");
     await saveAll();
-    const res = await fetch(`/api/scenes/${scene.id}/genimage`, {
+    const res = await fetch(`/api/scenes/${scene.id}/gen${kind === "image" ? "image" : "video"}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
@@ -534,16 +646,30 @@ function ScenePicker({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={2}
-            placeholder="Image prompt (editable before generating)"
+            placeholder="Prompt (editable before generating)"
             className="w-full rounded bg-slate-800 border border-slate-700 px-2 py-1.5 text-[11px]"
           />
-          <button
-            onClick={genImage}
-            disabled={busy || !prompt.trim()}
-            className="rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-3 py-1 text-[11px] font-medium"
-          >
-            {busy ? "Generating…" : "✨ Generate image"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => generate("image")}
+              disabled={busy || !prompt.trim()}
+              className="rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-3 py-1 text-[11px] font-medium"
+            >
+              {busy ? "Generating…" : "✨ Generate image"}
+            </button>
+            <button
+              onClick={() => generate("video")}
+              disabled={busy || !prompt.trim()}
+              title="AI-animate this scene (uses the current image when set)"
+              className="rounded bg-fuchsia-700 hover:bg-fuchsia-600 disabled:opacity-50 px-3 py-1 text-[11px] font-medium"
+            >
+              {busy ? "Generating…" : "🎬 Generate video"}
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-600">
+            Video generation animates the scene with the AI video model from Settings;
+            with an image selected it animates that image.
+          </p>
         </div>
       )}
 

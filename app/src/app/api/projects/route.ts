@@ -29,7 +29,10 @@ export async function POST(req: NextRequest) {
   try {
     await requireSession();
     const body = createSchema.parse(await req.json());
-    const item = await prisma.newsItem.findUnique({ where: { id: body.itemId } });
+    const item = await prisma.newsItem.findUnique({
+      where: { id: body.itemId },
+      include: { feed: { select: { brandId: true } } },
+    });
     if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 });
     const [width, height] = body.aspect === "9:16" ? [1080, 1920] : [1920, 1080];
     const project = await prisma.videoProject.create({
@@ -39,7 +42,8 @@ export async function POST(req: NextRequest) {
         aspect: body.aspect,
         width,
         height,
-        brandId: body.brandId ?? null,
+        // default to the feed's brand so intro/outro/logo apply automatically
+        brandId: body.brandId ?? item.feed.brandId ?? null,
         scriptPrompt: defaultScriptPrompt(body.aspect),
       },
     });

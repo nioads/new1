@@ -217,6 +217,56 @@ export async function generateImage(
   return Buffer.from(await img.arrayBuffer());
 }
 
+// ---------- video generation (scene animation) ----------
+
+export async function generateVideo(
+  settings: Settings,
+  prompt: string,
+  imagePath: string | null, // local file for image-to-video; null → text/mock
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  if (aiMocked(settings)) {
+    // mock: 4s animated clip (Ken Burns on the image, or a test pattern)
+    const dir = path.join(mediaDir(), "tts-tmp");
+    await mkdir(dir, { recursive: true });
+    const out = path.join(dir, `${crypto.randomBytes(6).toString("hex")}.mp4`);
+    const args = ["-y", "-hide_banner", "-loglevel", "error"];
+    if (imagePath) {
+      args.push(
+        "-i", imagePath,
+        "-vf",
+        `scale=${width * 2}:-2,zoompan=z='1+0.2*on/100':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=100:s=${width}x${height}:fps=25,setsar=1`,
+      );
+    } else {
+      args.push("-f", "lavfi", "-i", `testsrc2=size=${width}x${height}:rate=25:duration=4`);
+    }
+    args.push("-t", "4", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", out);
+    await run(process.env.FFMPEG_PATH ?? "ffmpeg", args);
+    return readFile(out);
+  }
+
+  const body: Record<string, unknown> = { prompt };
+  if (imagePath) {
+    const img = await readFile(imagePath);
+    body.image_url = `data:image/png;base64,${img.toString("base64")}`;
+  }
+  const res = await fetch(`https://fal.run/${settings.VIDEO_MODEL}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${settings.FAL_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15 * 60 * 1000),
+  });
+  if (!res.ok) throw new Error(`Video gen HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as { video?: { url: string } };
+  if (!data.video?.url) throw new Error("Video model returned no video");
+  const video = await fetch(data.video.url, { signal: AbortSignal.timeout(300000) });
+  return Buffer.from(await video.arrayBuffer());
+}
+
 // ---------- image/video search ----------
 
 export type SearchResult = {
