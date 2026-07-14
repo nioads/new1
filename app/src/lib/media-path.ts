@@ -1,7 +1,16 @@
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, writeFile, access } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { mediaDir } from "./storage";
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Resolves a media reference (local /api/files/... URL or remote http URL)
 // to a real filesystem path the renderer can read. Remote files are
@@ -26,4 +35,27 @@ export async function resolveToLocalFile(
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, Buffer.from(await res.arrayBuffer()));
   return { path: filePath, temp: true };
+}
+
+// Like resolveToLocalFile but returns null instead of throwing when the asset
+// is missing (stale local file, dead remote URL). Lets the renderer degrade
+// gracefully — one missing asset must not fail the whole video.
+export async function resolveOptionalLocalFile(
+  urlOrPath: string,
+  tmpSubdir = "render-tmp",
+): Promise<{ path: string; temp: boolean } | null> {
+  if (!urlOrPath) return null;
+  try {
+    const resolved = await resolveToLocalFile(urlOrPath, tmpSubdir);
+    if (!(await exists(resolved.path))) {
+      console.error(`[render] asset missing on disk, skipping: ${urlOrPath}`);
+      return null;
+    }
+    return resolved;
+  } catch (err) {
+    console.error(
+      `[render] could not resolve asset, skipping: ${urlOrPath} — ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
 }

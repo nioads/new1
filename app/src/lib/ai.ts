@@ -223,11 +223,16 @@ export async function generateImage(
     const dir = path.join(mediaDir(), "tts-tmp");
     await mkdir(dir, { recursive: true });
     const out = path.join(dir, `${crypto.randomBytes(6).toString("hex")}.png`);
-    const hue = Math.abs([...prompt].reduce((a, c) => a + c.charCodeAt(0), 0)) % 360;
+    // deterministic muted color from the prompt (ffmpeg color wants hex/named)
+    const h = Math.abs([...prompt].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7));
+    const r = 40 + (h % 120);
+    const g = 40 + ((h >> 3) % 120);
+    const b = 40 + ((h >> 6) % 120);
+    const hex = `0x${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
     await run(process.env.FFMPEG_PATH ?? "ffmpeg", [
       "-y", "-hide_banner", "-loglevel", "error",
       "-f", "lavfi",
-      "-i", `color=c=hsv(${hue}\\,0.6\\,0.5):s=${width}x${height}:d=1,format=rgb24`,
+      "-i", `color=c=${hex}:s=${width}x${height}:d=1,format=rgb24`,
       "-frames:v", "1", out,
     ]);
     return readFile(out);

@@ -7,7 +7,7 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import type { PrismaClient, Scene } from "../generated/prisma/client";
 import { mediaDir, storeFile } from "./storage";
-import { resolveToLocalFile } from "./media-path";
+import { resolveToLocalFile, resolveOptionalLocalFile } from "./media-path";
 import { generateImage, ffprobeDuration } from "./ai";
 import { getSettings } from "./settings";
 import {
@@ -181,12 +181,14 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     let total = 0;
     let captionOffset = 0;
     if (brand?.introUrl) {
-      const src = await resolveToLocalFile(brand.introUrl, `project-tmp/${job.id}`);
-      const introPath = path.join(workDir, "intro.mp4");
-      const d = await normalizeClip(src.path, job.width, job.height, introPath);
-      segments.push(introPath);
-      total += d;
-      captionOffset = d;
+      const src = await resolveOptionalLocalFile(brand.introUrl, `project-tmp/${job.id}`);
+      if (src) {
+        const introPath = path.join(workDir, "intro.mp4");
+        const d = await normalizeClip(src.path, job.width, job.height, introPath);
+        segments.push(introPath);
+        total += d;
+        captionOffset = d;
+      }
     }
 
     // 1. render each scene to a uniform segment
@@ -194,12 +196,16 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     for (const [i, scene] of scenes.entries()) {
       let imagePath: string | null = null;
       let isVideoVisual = false;
-      if (scene.imageUrl) {
-        const resolved = await resolveToLocalFile(scene.imageUrl, `project-tmp/${job.id}`);
-        imagePath = resolved.path;
-        isVideoVisual = !IMAGE_EXT.test(scene.imageUrl) && /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i.test(scene.imageUrl);
+      const resolvedVisual = scene.imageUrl
+        ? await resolveOptionalLocalFile(scene.imageUrl, `project-tmp/${job.id}`)
+        : null;
+      if (resolvedVisual) {
+        imagePath = resolvedVisual.path;
+        isVideoVisual =
+          !IMAGE_EXT.test(scene.imageUrl) && /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i.test(scene.imageUrl);
       } else {
-        // no visual chosen — generate one (mock-safe) from the scene prompt/query
+        // no visual (or the referenced file is missing) — generate a mock-safe
+        // placeholder from the scene prompt/query so the render still completes
         const buffer = await generateImage(
           settings,
           scene.imagePrompt || scene.imageQuery || scene.text.slice(0, 120),
@@ -212,7 +218,7 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
       }
       let ttsPath: string | null = null;
       if (scene.ttsUrl) {
-        ttsPath = (await resolveToLocalFile(scene.ttsUrl, `project-tmp/${job.id}`)).path;
+        ttsPath = (await resolveOptionalLocalFile(scene.ttsUrl, `project-tmp/${job.id}`))?.path ?? null;
       }
       const segPath = path.join(workDir, `seg-${String(i).padStart(3, "0")}.mp4`);
       const segDuration = await renderSceneSegment({
@@ -239,10 +245,12 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
 
     // 1b. brand outro (appended after scenes)
     if (brand?.outroUrl) {
-      const src = await resolveToLocalFile(brand.outroUrl, `project-tmp/${job.id}`);
-      const outroPath = path.join(workDir, "outro.mp4");
-      total += await normalizeClip(src.path, job.width, job.height, outroPath);
-      segments.push(outroPath);
+      const src = await resolveOptionalLocalFile(brand.outroUrl, `project-tmp/${job.id}`);
+      if (src) {
+        const outroPath = path.join(workDir, "outro.mp4");
+        total += await normalizeClip(src.path, job.width, job.height, outroPath);
+        segments.push(outroPath);
+      }
     }
 
     // 2. concatenate + optional music bed
@@ -253,7 +261,9 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     let musicPath: string | null = null;
     if (job.musicTrackId) {
       const track = await prisma.musicTrack.findUnique({ where: { id: job.musicTrackId } });
-      if (track) musicPath = (await resolveToLocalFile(track.url, `project-tmp/${job.id}`)).path;
+      if (track) {
+        musicPath = (await resolveOptionalLocalFile(track.url, `project-tmp/${job.id}`))?.path ?? null;
+      }
     }
     if (musicPath) args.push("-stream_loop", "-1", "-i", musicPath);
 
@@ -262,9 +272,11 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     // brand logo watermark
     let logoPath: string | null = null;
     if (brand?.logoUrl) {
-      logoPath = (await resolveToLocalFile(brand.logoUrl, `project-tmp/${job.id}`)).path;
-      args.push("-i", logoPath);
-      extraInputs++;
+      logoPath = (await resolveOptionalLocalFile(brand.logoUrl, `project-tmp/${job.id}`))?.path ?? null;
+      if (logoPath) {
+        args.push("-i", logoPath);
+        extraInputs++;
+      }
     }
 
     // burned-in captions (per-project toggle + selectable style)

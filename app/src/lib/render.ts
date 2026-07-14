@@ -188,17 +188,24 @@ export async function processNextRender(prisma: PrismaClient): Promise<boolean> 
     if (params.background.path) cleanup.push(params.background.path);
     cleanup.push(params.overlayPath);
 
+    const { resolveOptionalLocalFile } = await import("./media-path");
     if (params.music?.url && !params.music.path) {
-      const { resolveToLocalFile } = await import("./media-path");
-      const resolved = await resolveToLocalFile(params.music.url);
-      params.music.path = resolved.path;
-      if (resolved.temp) cleanup.push(resolved.path);
+      const resolved = await resolveOptionalLocalFile(params.music.url);
+      if (resolved) {
+        params.music.path = resolved.path;
+        if (resolved.temp) cleanup.push(resolved.path);
+      } else {
+        params.music = undefined; // missing track — render without music
+      }
     }
     if (params.voice?.url && !params.voice.path) {
-      const { resolveToLocalFile } = await import("./media-path");
-      const resolved = await resolveToLocalFile(params.voice.url);
-      params.voice.path = resolved.path;
-      if (resolved.temp) cleanup.push(resolved.path);
+      const resolved = await resolveOptionalLocalFile(params.voice.url);
+      if (resolved) {
+        params.voice.path = resolved.path;
+        if (resolved.temp) cleanup.push(resolved.path);
+      } else {
+        params.voice = undefined;
+      }
     }
 
     await mkdir(renderTmpDir(), { recursive: true });
