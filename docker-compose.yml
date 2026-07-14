@@ -16,6 +16,10 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
+      MEDIA_DIR: /app/data/media
+      SEARXNG_URL: http://searxng:8080
+    volumes:
+      - media:/app/data/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,6 +34,10 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       POLL_INTERVAL_MS: "30000"
+      MEDIA_DIR: /app/data/media
+      SEARXNG_URL: http://searxng:8080
+    volumes:
+      - media:/app/data/media
     depends_on:
       web:
         condition: service_started
@@ -57,17 +65,18 @@ services:
     volumes:
       - redisdata:/data
 
-  # Self-hosted metasearch for Phase 4 image/video selection.
+  # Self-hosted metasearch add-on used by article→video image/video search.
   searxng:
     image: searxng/searxng:latest
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
       SEARXNG_BASE_URL: http://localhost:8080/
     volumes:
-      - searxng:/etc/searxng
+      - ./searxng:/etc/searxng:ro
 
 volumes:
   pgdata:
   redisdata:
-  searxng:
+  media:

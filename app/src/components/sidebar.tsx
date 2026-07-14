@@ -10,8 +10,11 @@ const links = [
   { href: "/feeds", label: "Feeds", adminOnly: false },
   { href: "/categories", label: "Categories", adminOnly: false },
   { href: "/templates", label: "Templates", adminOnly: false },
+  { href: "/projects", label: "Article → Video", adminOnly: false },
+  { href: "/music", label: "Music", adminOnly: false },
   { href: "/brands", label: "Brands", adminOnly: true },
   { href: "/users", label: "Users", adminOnly: true },
+  { href: "/settings", label: "Settings", adminOnly: true },
 ];
 
 export function Sidebar({ user }: { user: { name: string; role: string } }) {

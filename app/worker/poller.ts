@@ -9,6 +9,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { fetchFeed } from "../src/lib/rss";
 import { broadcastPush } from "../src/lib/push";
 import { processNextRender } from "../src/lib/render";
+import { processNextProject } from "../src/lib/project-render";
 import { extractArticle } from "../src/lib/article";
 
 const prisma = new PrismaClient({
@@ -280,3 +281,19 @@ setInterval(async () => {
     rendering = false;
   }
 }, 3000);
+
+// Article→Video project queue.
+let projecting = false;
+setInterval(async () => {
+  if (projecting) return;
+  projecting = true;
+  try {
+    while (await processNextProject(prisma)) {
+      /* keep draining */
+    }
+  } catch (err) {
+    console.error("[project] queue error:", err);
+  } finally {
+    projecting = false;
+  }
+}, 4000);

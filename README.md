@@ -4,7 +4,7 @@ Monitor RSS news feeds and turn items into branded social content — image post
 short template videos, and AI article-to-video productions. See [SPEC.md](./SPEC.md)
 for the full product specification and phase plan.
 
-**Current status: Phases 1–3 complete**
+**Current status: Phases 1–4 core complete**
 
 - *Phase 1* — RSS feeds + categories, news inbox with filters, ~30-second polling
   worker with dedupe + conditional GETs, live in-app updates (SSE), browser Web
@@ -15,6 +15,15 @@ for the full product specification and phase plan.
   three linked sizes 16:9 / 9:16 / 1:1, role-bound text), and a **post composer**
   that fills a template from any inbox item, lets you pick any scraped image or
   upload one, adjust zoom/position, and export full-resolution PNGs per size.
+- *Phase 4 (core)* — **article → video**: create a project from any inbox item
+  (16:9 or 9:16); AI script generation with an editable prompt (fal.ai any-llm,
+  model selectable in Settings — mock mode without keys); scene breakdown with
+  per-scene visuals from **article media / SearxNG / Pexels / Pixabay / upload /
+  AI image generation** (queries and prompts editable); per-scene **voiceover**
+  button (ElevenLabs TTS, mock tone without a key); Ken Burns + fade/cut
+  transitions per scene; **music library** (upload or ElevenLabs generation)
+  mixed as a bed under narration; worker assembles everything with ffmpeg into
+  an H.264 MP4. Admin **Settings** page stores all API keys and model choices.
 - *Phase 3* — **short video posts (≤5s)** rendered by ffmpeg in the worker:
   templates carry an editorial kind (breaking/quotes/events/attacks/custom) and
   motion defaults; the composer exports videos per size with Ken Burns motion
@@ -88,7 +97,9 @@ npm run worker     # feed poller (separate terminal)
 | `POLL_INTERVAL_MS` | Feed polling interval (default 30000) |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Initial admin account |
 
-## Roadmap
+## Roadmap (Phase 4 remaining)
 
-- **Phase 4** — article → video: AI script/scenes, SearxNG/stock/MRSS visuals,
-  ElevenLabs TTS, Whisper captions (Hormozi style), music library, up-to-30-min renders
+- Whisper word-level captions (Hormozi style, any language)
+- Brand intro/outro clips and logo watermark on article→video renders
+- AI scene animation (fal image-to-video) as an alternative to Ken Burns
+- MRSS feeds as scene-footage sources; crop/position editor for scene images

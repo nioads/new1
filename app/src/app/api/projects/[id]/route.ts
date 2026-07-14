@@ -1,0 +1,105 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { requireSession } from "@/lib/auth";
+import { jsonError } from "@/lib/api";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    await requireSession();
+    const { id } = await params;
+    const project = await prisma.videoProject.findUnique({
+      where: { id },
+      include: { scenes: { orderBy: { order: "asc" } } },
+    });
+    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const item = await prisma.newsItem.findUnique({
+      where: { id: project.itemId },
+      include: { media: true, feed: { select: { title: true } } },
+    });
+    return NextResponse.json({ ...project, item });
+  } catch (err) {
+    return jsonError(err);
+  }
+}
+
+const sceneSchema = z.object({
+  id: z.string(),
+  text: z.string().optional(),
+  imageUrl: z.string().optional(),
+  imageQuery: z.string().optional(),
+  imagePrompt: z.string().optional(),
+  kenburns: z.string().optional(),
+  transition: z.string().optional(),
+  durationSec: z.number().min(1).max(60).optional(),
+});
+
+const patchSchema = z.object({
+  script: z.string().optional(),
+  scriptPrompt: z.string().optional(),
+  musicTrackId: z.string().nullable().optional(),
+  aspect: z.enum(["16:9", "9:16"]).optional(),
+  brandId: z.string().nullable().optional(),
+  scenes: z.array(sceneSchema).optional(),
+  queueRender: z.boolean().optional(),
+});
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    await requireSession();
+    const { id } = await params;
+    const body = patchSchema.parse(await req.json());
+
+    const data: Record<string, unknown> = {};
+    if (body.script !== undefined) data.script = body.script;
+    if (body.scriptPrompt !== undefined) data.scriptPrompt = body.scriptPrompt;
+    if (body.musicTrackId !== undefined) data.musicTrackId = body.musicTrackId;
+    if (body.brandId !== undefined) data.brandId = body.brandId;
+    if (body.aspect !== undefined) {
+      data.aspect = body.aspect;
+      data.width = body.aspect === "9:16" ? 1080 : 1920;
+      data.height = body.aspect === "9:16" ? 1920 : 1080;
+    }
+    if (body.queueRender) {
+      data.status = "QUEUED";
+      data.error = "";
+    }
+    await prisma.videoProject.update({ where: { id }, data });
+
+    for (const scene of body.scenes ?? []) {
+      const { id: sceneId, ...fields } = scene;
+      await prisma.scene.updateMany({
+        where: { id: sceneId, projectId: id },
+        data: fields,
+      });
+    }
+
+    const project = await prisma.videoProject.findUnique({
+      where: { id },
+      include: { scenes: { orderBy: { order: "asc" } } },
+    });
+    return NextResponse.json(project);
+  } catch (err) {
+    return jsonError(err);
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    await requireSession();
+    const { id } = await params;
+    await prisma.videoProject.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return jsonError(err);
+  }
+}

@@ -197,6 +197,72 @@ model NewsItem {
   @@index([feedId, publishedAt(sort: Desc)])
 }
 
+// Key-value app settings editable from the admin UI (AI keys, model choices…).
+model Setting {
+  key   String @id
+  value String
+}
+
+model MusicTrack {
+  id          String   @id @default(cuid())
+  name        String
+  url         String
+  storageKey  String   @default("")
+  durationSec Float    @default(0)
+  source      String   @default("upload") // upload | elevenlabs | fal
+  createdAt   DateTime @default(now())
+}
+
+enum ProjectStatus {
+  DRAFT
+  QUEUED
+  RENDERING
+  DONE
+  ERROR
+}
+
+// Article → Video project: script broken into scenes, each with its own
+// visual, narration, motion and transition; assembled by the worker.
+model VideoProject {
+  id           String        @id @default(cuid())
+  itemId       String
+  title        String        @default("")
+  brandId      String?
+  aspect       String        @default("16:9") // 16:9 | 9:16
+  width        Int           @default(1920)
+  height       Int           @default(1080)
+  status       ProjectStatus @default(DRAFT)
+  scriptPrompt String        @default("")
+  script       String        @default("")
+  musicTrackId String?
+  outputUrl    String        @default("")
+  error        String        @default("")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  scenes Scene[]
+
+  @@index([status, createdAt])
+}
+
+model Scene {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order       Int
+  text        String       @default("")
+  imageUrl    String       @default("")
+  imageQuery  String       @default("") // search query used/editable
+  imagePrompt String       @default("") // AI generation prompt used/editable
+  ttsUrl      String       @default("")
+  ttsDuration Float        @default(0)
+  kenburns    String       @default("in") // in | out | left | right | none
+  transition  String       @default("fade") // fade | cut (to next scene)
+  durationSec Float        @default(4)
+
+  @@index([projectId, order])
+}
+
 model PushSubscription {
   id        String   @id @default(cuid())
   userId    String

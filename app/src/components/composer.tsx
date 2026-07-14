@@ -44,6 +44,8 @@ export function Composer({ itemId }: { itemId: string }) {
   const [layer, setLayer] = useState<"all" | "bg" | "overlay">("all");
   const [videoBusy, setVideoBusy] = useState<string | null>(null);
   const [renders, setRenders] = useState<RenderDto[]>([]);
+  const [music, setMusic] = useState<Array<{ id: string; name: string }>>([]);
+  const [musicTrackId, setMusicTrackId] = useState("");
   const stageRef = useRef<Konva.Stage>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +68,7 @@ export function Composer({ itemId }: { itemId: string }) {
         }
       });
     fetch("/api/brands").then((r) => r.json()).then(setBrands);
+    fetch("/api/music").then((r) => r.json()).then(setMusic);
   }, [itemId]);
 
   const template = templates.find((t) => t.id === templateId) ?? null;
@@ -173,6 +176,7 @@ export function Composer({ itemId }: { itemId: string }) {
           overlayDataUrl,
           kenburns: motion.kenburns,
           textAnim: motion.textAnim,
+          musicTrackId: musicTrackId || undefined,
         }),
       });
       if (!res.ok) {
@@ -479,6 +483,21 @@ export function Composer({ itemId }: { itemId: string }) {
                 </select>
               </label>
               <label className="col-span-2 block text-[11px] text-slate-500">
+                Music
+                <select
+                  value={musicTrackId}
+                  onChange={(e) => setMusicTrackId(e.target.value)}
+                  className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                >
+                  <option value="">No music</option>
+                  {music.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      ♫ {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="col-span-2 block text-[11px] text-slate-500">
                 Text animation
                 <select
                   value={motion.textAnim}
@@ -523,8 +542,12 @@ export function Composer({ itemId }: { itemId: string }) {
                       ⬇ MP4
                     </a>
                   ) : r.status === "ERROR" ? (
-                    <span className="ml-auto text-red-400 truncate max-w-32" title={r.error}>
-                      failed
+                    <span
+                      className="ml-auto text-red-400 truncate max-w-40 cursor-help"
+                      title={r.error}
+                      onClick={() => alert(r.error || "Unknown render error")}
+                    >
+                      failed: {r.error?.slice(0, 40) || "unknown"}
                     </span>
                   ) : (
                     <span className="ml-auto text-amber-400 animate-pulse">

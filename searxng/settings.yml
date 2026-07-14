@@ -1,0 +1,25 @@
+# SearxNG configuration for News Content Studio.
+# json format must be enabled for the app's image/video search API.
+use_default_settings: true
+
+server:
+  secret_key: "change-me-in-production-3f9a1c7e5d2b"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+
+engines:
+  - name: google images
+    disabled: false
+  - name: bing images
+    disabled: false
+  - name: duckduckgo images
+    disabled: false
+  - name: google videos
+    disabled: false
+  - name: bing videos
+    disabled: false

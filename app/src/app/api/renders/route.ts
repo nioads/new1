@@ -22,6 +22,7 @@ const createSchema = z.object({
   overlayDataUrl: z.string().startsWith("data:"),
   kenburns: z.enum(["in", "out", "left", "right", "none"]).default("in"),
   textAnim: z.enum(["fade", "slideup", "none"]).default("slideup"),
+  musicTrackId: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -43,6 +44,12 @@ export async function POST(req: NextRequest) {
       await writeDataUrl(body.backgroundDataUrl, bgPath);
     }
 
+    let musicUrl: string | undefined;
+    if (body.musicTrackId) {
+      const track = await prisma.musicTrack.findUnique({ where: { id: body.musicTrackId } });
+      musicUrl = track?.url;
+    }
+
     const render = await prisma.videoRender.create({
       data: {
         aspect: body.aspect,
@@ -58,6 +65,7 @@ export async function POST(req: NextRequest) {
           overlayPath,
           kenburns: body.kenburns,
           textAnim: body.textAnim,
+          ...(musicUrl ? { music: { url: musicUrl } } : {}),
         },
       },
     });

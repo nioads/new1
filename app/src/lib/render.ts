@@ -16,6 +16,7 @@ export type RenderParams = {
   overlayPath: string;
   kenburns: KenBurns;
   textAnim: TextAnim;
+  music?: { url?: string; path?: string };
 };
 
 const FFMPEG = () => process.env.FFMPEG_PATH ?? "ffmpeg";
@@ -89,28 +90,20 @@ export function buildFfmpegArgs(p: RenderParams, outPath: string): string[] {
       ? `scale=${p.width}:${p.height}:force_original_aspect_ratio=increase,crop=${p.width}:${p.height},fps=${p.fps},setsar=1`
       : kenburnsFilter(p);
 
-  args.push(
-    "-filter_complex",
-    `[0:v]${bgFilter}[bg];[1:v]${anim.filter}[ov];[bg][ov]${anim.overlay}[out]`,
-    "-map",
-    "[out]",
-    "-t",
-    String(p.duration),
-    "-r",
-    String(p.fps),
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-movflags",
-    "+faststart",
-    "-an",
-    outPath,
-  );
+  let filter = `[0:v]${bgFilter}[bg];[1:v]${anim.filter}[ov];[bg][ov]${anim.overlay}[out]`;
+  const maps: string[] = ["-map", "[out]"];
+  if (p.music?.path) {
+    args.push("-stream_loop", "-1", "-i", p.music.path);
+    const fadeStart = Math.max(0, p.duration - 1).toFixed(2);
+    filter += `;[2:a]volume=0.35,afade=t=out:st=${fadeStart}:d=1[aout]`;
+    maps.push("-map", "[aout]");
+  }
+
+  args.push("-filter_complex", filter, ...maps, "-t", String(p.duration), "-r", String(p.fps));
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p");
+  if (p.music?.path) args.push("-c:a", "aac", "-ar", "44100", "-ac", "2");
+  else args.push("-an");
+  args.push("-movflags", "+faststart", outPath);
   return args;
 }
 
@@ -174,6 +167,13 @@ export async function processNextRender(prisma: PrismaClient): Promise<boolean> 
     if (!params.background.path) throw new Error("No background available");
     if (params.background.path) cleanup.push(params.background.path);
     cleanup.push(params.overlayPath);
+
+    if (params.music?.url && !params.music.path) {
+      const { resolveToLocalFile } = await import("./media-path");
+      const resolved = await resolveToLocalFile(params.music.url);
+      params.music.path = resolved.path;
+      if (resolved.temp) cleanup.push(resolved.path);
+    }
 
     await mkdir(renderTmpDir(), { recursive: true });
     await runFfmpeg(buildFfmpegArgs(params, outPath));
