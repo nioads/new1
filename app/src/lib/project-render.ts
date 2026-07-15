@@ -7,7 +7,7 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import type { PrismaClient, Scene } from "../generated/prisma/client";
 import { mediaDir, storeFile } from "./storage";
-import { resolveToLocalFile, resolveOptionalLocalFile } from "./media-path";
+import { resolveOptionalLocalFile } from "./media-path";
 import { generateImage, ffprobeDuration } from "./ai";
 import { getSettings } from "./settings";
 import {
@@ -304,11 +304,23 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
       }
     }
 
-    // 2. concatenate + optional music bed
+    // 2. Concatenate segments with the concat demuxer. All segments share the
+    //    exact same codec/params (normalizeClip + renderSceneSegment), so this
+    //    is a robust stream-copy — no fragile N-input filtergraph index math.
     const outPath = path.join(workDir, "final.mp4");
-    const args: string[] = ["-y", "-hide_banner", "-loglevel", "error"];
-    for (const seg of segments) args.push("-i", seg);
+    const concatMp4 = path.join(workDir, "concat.mp4");
+    const listPath = path.join(workDir, "segments.txt");
+    await writeFile(
+      listPath,
+      segments.map((s) => `file '${s.replace(/'/g, "'\\''")}'`).join("\n"),
+    );
+    await run([
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-f", "concat", "-safe", "0", "-i", listPath,
+      "-c", "copy", concatMp4,
+    ]);
 
+    // resolve optional overlays / bed
     let musicPath: string | null = null;
     if (job.musicTrackId) {
       const track = await prisma.musicTrack.findUnique({ where: { id: job.musicTrackId } });
@@ -316,21 +328,10 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
         musicPath = (await resolveOptionalLocalFile(track.url, `project-tmp/${job.id}`))?.path ?? null;
       }
     }
-    if (musicPath) args.push("-stream_loop", "-1", "-i", musicPath);
-
-    let extraInputs = musicPath ? 1 : 0;
-
-    // brand logo watermark
     let logoPath: string | null = null;
     if (brand?.logoUrl) {
       logoPath = (await resolveOptionalLocalFile(brand.logoUrl, `project-tmp/${job.id}`))?.path ?? null;
-      if (logoPath) {
-        args.push("-i", logoPath);
-        extraInputs++;
-      }
     }
-
-    // burned-in captions (per-project toggle + selectable style)
     let assPath: string | null = null;
     if (job.captionsEnabled && sceneCaptions.length > 0) {
       let spec: CaptionStyleSpec = BUILTIN_CAPTION_STYLES[0].style;
@@ -342,38 +343,64 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
       await writeFile(assPath, buildAss(sceneCaptions, spec, job.width, job.height));
     }
 
-    const pairs = segments.map((_, i) => `[${i}:v][${i}:a]`).join("");
-    let filter = `${pairs}concat=n=${segments.length}:v=1:a=1[cv][na]`;
-    let vLabel = "cv";
-    if (logoPath) {
-      const logoIdx = segments.length + (musicPath ? 1 : 0);
-      const logoW = Math.round(job.width * 0.12);
-      filter += `;[${logoIdx}:v]scale=${logoW}:-1[lg];[${vLabel}][lg]overlay=W-w-${Math.round(job.width * 0.03)}:${Math.round(job.width * 0.03)}[lv]`;
-      vLabel = "lv";
-    }
-    if (assPath) {
-      const escaped = assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
-      filter += `;[${vLabel}]subtitles='${escaped}'[sv]`;
-      vLabel = "sv";
-    }
-    filter += `;[${vLabel}]null[v]`;
-    void extraInputs;
-    if (musicPath) {
-      const fadeStart = Math.max(0, total - 2).toFixed(2);
-      filter += `;[${segments.length}:a]volume=0.22[mq];[na][mq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=2[a]`;
+    // 2b. Second pass over the concatenated video: logo watermark + burned
+    //     captions (video) and music bed (audio). Input 0 is always the concat;
+    //     music/logo get the next indices only when present.
+    const needVideoFx = !!logoPath || !!assPath;
+    const needAudioFx = !!musicPath;
+    if (!needVideoFx && !needAudioFx) {
+      await rm(outPath, { force: true }).catch(() => {});
+      const { rename } = await import("fs/promises");
+      await rename(concatMp4, outPath);
     } else {
-      filter += `;[na]anull[a]`;
+      const args: string[] = ["-y", "-hide_banner", "-loglevel", "error", "-i", concatMp4];
+      let idx = 1;
+      let musicIdx = -1;
+      let logoIdx = -1;
+      if (musicPath) {
+        args.push("-stream_loop", "-1", "-i", musicPath);
+        musicIdx = idx++;
+      }
+      if (logoPath) {
+        args.push("-i", logoPath);
+        logoIdx = idx++;
+      }
+      const fc: string[] = [];
+      let vOut = "0:v";
+      if (needVideoFx) {
+        let v = "[0:v]";
+        if (logoIdx >= 0) {
+          const logoW = Math.round(job.width * 0.12);
+          const m = Math.round(job.width * 0.03);
+          fc.push(`[${logoIdx}:v]scale=${logoW}:-1[lg]`);
+          fc.push(`${v}[lg]overlay=W-w-${m}:${m}[lv]`);
+          v = "[lv]";
+        }
+        if (assPath) {
+          const escaped = assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+          fc.push(`${v}subtitles='${escaped}'[sv]`);
+          v = "[sv]";
+        }
+        vOut = v.replace(/[[\]]/g, "");
+      }
+      let aOut = "0:a";
+      if (needAudioFx) {
+        const fadeStart = Math.max(0, total - 2).toFixed(2);
+        fc.push(`[${musicIdx}:a]volume=0.22[mq]`);
+        fc.push(
+          `[0:a][mq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=2[amx]`,
+        );
+        aOut = "amx";
+      }
+      args.push("-filter_complex", fc.join(";"));
+      args.push("-map", needVideoFx ? `[${vOut}]` : "0:v");
+      args.push("-map", needAudioFx ? `[${aOut}]` : "0:a");
+      args.push("-t", total.toFixed(2));
+      args.push(...(needVideoFx ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"] : ["-c:v", "copy"]));
+      args.push(...(needAudioFx ? ["-c:a", "aac", "-ar", "44100", "-ac", "2"] : ["-c:a", "copy"]));
+      args.push("-movflags", "+faststart", outPath);
+      await run(args, 20 * 60 * 1000);
     }
-    args.push(
-      "-filter_complex", filter,
-      "-map", "[v]", "-map", "[a]",
-      "-t", total.toFixed(2),
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-      "-c:a", "aac", "-ar", "44100", "-ac", "2",
-      "-movflags", "+faststart",
-      outPath,
-    );
-    await run(args, 20 * 60 * 1000);
 
     const buffer = await readFile(outPath);
     const stored = await storeFile(brand, buffer, `project-${job.id}.mp4`, "video/mp4");

@@ -51,6 +51,9 @@ const patchSchema = z.object({
   captionStyleId: z.string().nullable().optional(),
   aspect: z.enum(["16:9", "9:16"]).optional(),
   brandId: z.string().nullable().optional(),
+  targetSeconds: z.number().int().min(10).max(1800).optional(),
+  scriptModel: z.string().optional(),
+  visualMode: z.enum(["search", "ai"]).optional(),
   scenes: z.array(sceneSchema).optional(),
   queueRender: z.boolean().optional(),
 });
@@ -69,6 +72,9 @@ export async function PATCH(
     if (body.scriptPrompt !== undefined) data.scriptPrompt = body.scriptPrompt;
     if (body.musicTrackId !== undefined) data.musicTrackId = body.musicTrackId;
     if (body.voiceId !== undefined) data.voiceId = body.voiceId;
+    if (body.targetSeconds !== undefined) data.targetSeconds = body.targetSeconds;
+    if (body.scriptModel !== undefined) data.scriptModel = body.scriptModel;
+    if (body.visualMode !== undefined) data.visualMode = body.visualMode;
     if (body.captionsEnabled !== undefined) data.captionsEnabled = body.captionsEnabled;
     if (body.captionStyleId !== undefined) data.captionStyleId = body.captionStyleId;
     if (body.brandId !== undefined) data.brandId = body.brandId;

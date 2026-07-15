@@ -5,8 +5,48 @@ import { spawn } from "child_process";
 import { mkdir, readFile } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
-import { aiMocked, ttsMocked, type Settings } from "./settings";
+import { aiMocked, ttsMocked, llmMocked, type Settings } from "./settings";
 import { mediaDir } from "./storage";
+
+// Routes a text prompt to the configured LLM provider (fal any-llm or a local
+// Ollama server running e.g. gemma). Returns the raw completion text.
+export async function generateText(
+  settings: Settings,
+  prompt: string,
+  modelOverride?: string,
+): Promise<string> {
+  if (settings.LLM_PROVIDER === "ollama") {
+    const base = settings.OLLAMA_URL.replace(/\/$/, "");
+    const res = await fetch(`${base}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelOverride || settings.OLLAMA_MODEL,
+        prompt,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = (await res.json()) as { response?: string };
+    return data.response ?? "";
+  }
+  const res = await fetch("https://fal.run/fal-ai/any-llm", {
+    method: "POST",
+    headers: { Authorization: `Key ${settings.FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: modelOverride || settings.LLM_MODEL, prompt }),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as { output?: string };
+  return data.output ?? "";
+}
+
+function extractJson(raw: string): unknown {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("model returned no JSON");
+  return JSON.parse(match[0]);
+}
 
 // ---------- script generation ----------
 
@@ -23,9 +63,9 @@ Respond ONLY with JSON: {"scenes":[{"text":"...","imageQuery":"..."}]}`;
 export async function generateScript(
   settings: Settings,
   article: { title: string; content: string },
-  opts: { prompt: string; sceneCount: number },
+  opts: { prompt: string; sceneCount: number; model?: string },
 ): Promise<GeneratedScript> {
-  if (aiMocked(settings)) {
+  if (llmMocked(settings)) {
     // deterministic mock: split article text into sentence groups
     const text = `${article.title}. ${article.content}`.replace(/\s+/g, " ").trim();
     const sentences = text.split(/(?<=[.!؟?۔])\s+/).filter((s) => s.length > 8);
@@ -40,27 +80,64 @@ export async function generateScript(
     return { script: scenes.map((s) => s.text).join("\n\n"), scenes };
   }
 
-  const res = await fetch("https://fal.run/fal-ai/any-llm", {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${settings.FAL_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: settings.LLM_MODEL,
-      prompt: `${opts.prompt}\n\nTarget scene count: ${opts.sceneCount}\n\nARTICLE TITLE: ${article.title}\n\nARTICLE:\n${article.content.slice(0, 24000)}`,
-    }),
-    signal: AbortSignal.timeout(120000),
-  });
-  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = (await res.json()) as { output?: string };
-  const raw = data.output ?? "";
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("LLM returned no JSON");
-  const parsed = JSON.parse(jsonMatch[0]) as { scenes?: GeneratedScene[] };
+  const raw = await generateText(
+    settings,
+    `${opts.prompt}\n\nTarget scene count: ${opts.sceneCount}\n\nARTICLE TITLE: ${article.title}\n\nARTICLE:\n${article.content.slice(0, 24000)}`,
+    opts.model,
+  );
+  const parsed = extractJson(raw) as { scenes?: GeneratedScene[] };
   const scenes = (parsed.scenes ?? []).filter((s) => s.text?.trim());
   if (scenes.length === 0) throw new Error("LLM returned no scenes");
   return { script: scenes.map((s) => s.text).join("\n\n"), scenes };
+}
+
+// Generates social-media metadata for a piece of content: a short punchy
+// highlight (overlay headline), an SM caption, a YouTube-style description,
+// and hashtags/tags. Works via fal or Ollama; mock produces sensible text.
+export type ContentMeta = {
+  highlight: string;
+  caption: string;
+  description: string;
+  tags: string[];
+};
+
+export async function generateMetadata(
+  settings: Settings,
+  content: { title: string; body: string; lang?: string },
+): Promise<ContentMeta> {
+  if (llmMocked(settings)) {
+    const clean = `${content.title}. ${content.body}`.replace(/\s+/g, " ").trim();
+    const firstSentence = clean.split(/(?<=[.!؟?۔])\s+/)[0] ?? content.title;
+    const words = content.title
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 6);
+    return {
+      highlight: content.title.slice(0, 80),
+      caption: `${firstSentence.slice(0, 180)}`,
+      description: clean.slice(0, 500),
+      tags: [...new Set(words.map((w) => w.toLowerCase()))],
+    };
+  }
+  const prompt = `You are a social media editor. For the news content below, respond ONLY with JSON:
+{"highlight":"a very short punchy headline (max 8 words) to overlay on the image/video, in the content's language",
+ "caption":"an engaging social media caption with 1-2 relevant emojis, in the content's language",
+ "description":"a longer YouTube-style description (2-4 sentences), in the content's language",
+ "tags":["8-12 lowercase hashtag-style keywords, no # symbol, mix of the content language and English"]}
+
+TITLE: ${content.title}
+
+CONTENT:
+${content.body.slice(0, 12000)}`;
+  const raw = await generateText(settings, prompt);
+  const parsed = extractJson(raw) as Partial<ContentMeta>;
+  return {
+    highlight: (parsed.highlight ?? content.title).toString().slice(0, 120),
+    caption: (parsed.caption ?? "").toString().slice(0, 600),
+    description: (parsed.description ?? "").toString().slice(0, 2000),
+    tags: Array.isArray(parsed.tags) ? parsed.tags.map((t) => String(t)).slice(0, 15) : [],
+  };
 }
 
 // ---------- TTS ----------

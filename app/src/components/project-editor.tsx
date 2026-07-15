@@ -42,6 +42,13 @@ type ProjectDto = {
   captionsEnabled: boolean;
   captionStyleId: string | null;
   brandId: string | null;
+  targetSeconds: number;
+  scriptModel: string;
+  visualMode: string;
+  smHighlight: string;
+  smCaption: string;
+  smDescription: string;
+  smTags: string;
   outputUrl: string;
   error: string;
   scenes: SceneDto[];
@@ -63,6 +70,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
   const [sceneCount, setSceneCount] = useState(6);
   const [generating, setGenerating] = useState(false);
+  const [metaBusy, setMetaBusy] = useState(false);
   const [error, setError] = useState("");
   const [pickerScene, setPickerScene] = useState<string | null>(null);
   const [busyScene, setBusyScene] = useState<string | null>(null);
@@ -112,6 +120,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         musicTrackId: project.musicTrackId,
         voiceId: project.voiceId,
         brandId: project.brandId,
+        targetSeconds: project.targetSeconds,
+        scriptModel: project.scriptModel,
+        visualMode: project.visualMode,
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
         scenes: project.scenes.map((s) => ({
@@ -170,6 +181,32 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
   async function renderProject() {
     await save({ queueRender: true });
+  }
+
+  async function generateMeta() {
+    if (!project) return;
+    setMetaBusy(true);
+    setError("");
+    const res = await fetch("/api/ai/metadata", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id }),
+    });
+    setMetaBusy(false);
+    if (res.ok) {
+      const m = await res.json();
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              smHighlight: m.highlight,
+              smCaption: m.caption,
+              smDescription: m.description,
+              smTags: (m.tags || []).join(", "),
+            }
+          : prev,
+      );
+    } else setError((await res.json()).error ?? "Metadata generation failed");
   }
 
   async function addScene(afterOrder: number) {
@@ -308,10 +345,66 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         </div>
       )}
 
+      {/* pre-generation options */}
+      <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500">1 — Setup</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <label className="block text-[11px] text-slate-500">
+            Size
+            <select
+              value={project.aspect}
+              onChange={(e) => setProject({ ...project, aspect: e.target.value as "16:9" | "9:16" })}
+              className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+            >
+              <option value="16:9">Landscape 16:9</option>
+              <option value="9:16">Vertical 9:16</option>
+            </select>
+          </label>
+          <label className="block text-[11px] text-slate-500">
+            Target length
+            <select
+              value={project.targetSeconds}
+              onChange={(e) => {
+                const s = Number(e.target.value);
+                setProject({ ...project, targetSeconds: s });
+                setSceneCount(Math.max(2, Math.round(s / 10)));
+              }}
+              className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+            >
+              {[30, 60, 90, 120, 180, 300, 600].map((s) => (
+                <option key={s} value={s}>
+                  {s < 60 ? `${s}s` : `${s / 60} min`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-[11px] text-slate-500">
+            Visuals
+            <select
+              value={project.visualMode}
+              onChange={(e) => setProject({ ...project, visualMode: e.target.value })}
+              className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+            >
+              <option value="search">Free search (SearxNG/stock)</option>
+              <option value="ai">AI image generation</option>
+            </select>
+          </label>
+          <label className="block text-[11px] text-slate-500">
+            Script model (blank = default)
+            <input
+              value={project.scriptModel}
+              placeholder="e.g. openai/gpt-4o"
+              onChange={(e) => setProject({ ...project, scriptModel: e.target.value })}
+              className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+            />
+          </label>
+        </div>
+      </div>
+
       {/* script generation */}
       <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-3">
         <p className="text-xs uppercase tracking-wide text-slate-500">
-          1 — Script (prompt is editable before generating)
+          2 — Script (prompt is editable before generating)
         </p>
         <textarea
           value={project.scriptPrompt}
@@ -319,36 +412,51 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           rows={4}
           className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="text-xs text-slate-400">
             Scenes:
             <input
               type="number"
               min={2}
-              max={120}
+              max={200}
               value={sceneCount}
               onChange={(e) => setSceneCount(Number(e.target.value))}
               className="ml-2 w-16 rounded-lg bg-slate-800 border border-slate-700 px-2 py-1 text-xs"
             />
           </label>
           <button
-            onClick={generateScript}
+            onClick={async () => {
+              await save();
+              generateScript();
+            }}
             disabled={generating}
             className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-1.5 text-sm font-medium"
           >
             {generating ? "Generating…" : project.scenes.length ? "↻ Regenerate script" : "✨ Generate script"}
           </button>
-          <span className="text-[11px] text-slate-600">
-            Replaces current scenes; article images pre-assigned.
-          </span>
+          <button
+            onClick={generateMeta}
+            disabled={metaBusy}
+            className="rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-3 py-1.5 text-xs"
+          >
+            {metaBusy ? "…" : "✦ AI caption / tags"}
+          </button>
         </div>
+        {project.smCaption && (
+          <div className="rounded-lg bg-slate-950 border border-slate-800 p-3 space-y-2 text-xs">
+            <MetaRow label="Highlight" value={project.smHighlight} />
+            <MetaRow label="Caption" value={project.smCaption} />
+            <MetaRow label="Description" value={project.smDescription} />
+            <MetaRow label="Tags" value={project.smTags} />
+          </div>
+        )}
       </div>
 
       {/* scenes */}
       {project.scenes.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">
-            2 — Scenes ({project.scenes.length})
+            3 — Scenes ({project.scenes.length})
           </p>
           {project.scenes.map((scene, i) => (
             <div
@@ -808,6 +916,29 @@ function ScenePicker({
         </div>
       )}
       {err && <p className="text-[11px] text-red-400">{err}</p>}
+    </div>
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-slate-500 w-20 shrink-0">{label}</span>
+      <span dir="auto" className="flex-1 text-slate-200 break-words">
+        {value}
+      </span>
+      <button
+        onClick={() => {
+          navigator.clipboard?.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }}
+        className="text-slate-500 hover:text-white shrink-0"
+      >
+        {copied ? "✓" : "copy"}
+      </button>
     </div>
   );
 }

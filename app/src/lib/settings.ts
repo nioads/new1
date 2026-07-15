@@ -9,6 +9,9 @@ export const SETTING_DEFS = [
   { key: "PEXELS_KEY", label: "Pexels API key", secret: true, def: "" },
   { key: "PIXABAY_KEY", label: "Pixabay API key", secret: true, def: "" },
   { key: "SEARXNG_URL", label: "SearxNG URL", secret: false, def: "" },
+  { key: "LLM_PROVIDER", label: "LLM provider (fal | ollama)", secret: false, def: "fal" },
+  { key: "OLLAMA_URL", label: "Ollama base URL", secret: false, def: "http://host.docker.internal:11434" },
+  { key: "OLLAMA_MODEL", label: "Ollama model (e.g. gemma2)", secret: false, def: "gemma2" },
   { key: "LLM_MODEL", label: "Script LLM model (fal any-llm)", secret: false, def: "openai/gpt-4o" },
   { key: "IMAGE_MODEL", label: "Image generation model (fal)", secret: false, def: "fal-ai/flux/schnell" },
   { key: "VIDEO_MODEL", label: "Scene animation model (fal)", secret: false, def: "fal-ai/kling-video/v2/master/image-to-video" },
@@ -34,9 +37,15 @@ export async function getSettings(prisma: PrismaClient): Promise<Settings> {
 
 // Mock mode: exercised automatically when the relevant API key is missing,
 // so the whole pipeline stays testable without accounts.
+// aiMocked governs image/video generation (fal only).
 export function aiMocked(settings: Settings): boolean {
   return !settings.FAL_KEY;
 }
 export function ttsMocked(settings: Settings): boolean {
   return !settings.ELEVENLABS_KEY;
+}
+// Text/LLM generation can use fal or a local Ollama (gemma) server.
+export function llmMocked(settings: Settings): boolean {
+  if (settings.LLM_PROVIDER === "ollama") return !settings.OLLAMA_URL;
+  return !settings.FAL_KEY;
 }

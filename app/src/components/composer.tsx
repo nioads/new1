@@ -49,6 +49,8 @@ export function Composer({ itemId }: { itemId: string }) {
   const [voices, setVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceId, setVoiceId] = useState("");
+  const [meta, setMeta] = useState<{ caption: string; description: string; tags: string[] } | null>(null);
+  const [metaBusy, setMetaBusy] = useState(false);
   const stageRef = useRef<Konva.Stage>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -285,7 +287,30 @@ export function Composer({ itemId }: { itemId: string }) {
         {/* left: content + media */}
         <div className="w-72 shrink-0 border-r border-slate-800 p-3 space-y-4 overflow-y-auto">
           <label className="block text-xs text-slate-400">
-            Headline
+            <span className="flex items-center justify-between">
+              Headline
+              <button
+                onClick={async () => {
+                  setMetaBusy(true);
+                  const res = await fetch("/api/ai/metadata", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ itemId }),
+                  });
+                  setMetaBusy(false);
+                  if (res.ok) {
+                    const m = await res.json();
+                    setHeadline(m.highlight || headline);
+                    setMeta({ caption: m.caption, description: m.description, tags: m.tags || [] });
+                  }
+                }}
+                disabled={metaBusy}
+                title="AI: summarize the article into a punchy headline + social copy"
+                className="text-indigo-400 hover:text-indigo-300 disabled:opacity-50 text-[11px]"
+              >
+                {metaBusy ? "…" : "✦ AI highlight"}
+              </button>
+            </span>
             <textarea
               dir="auto"
               value={headline}
@@ -294,6 +319,14 @@ export function Composer({ itemId }: { itemId: string }) {
               className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm"
             />
           </label>
+          {meta && (
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-2.5 space-y-1.5 text-[11px]">
+              <p className="text-slate-500 uppercase tracking-wide">AI social copy</p>
+              <CopyRow label="Caption" value={meta.caption} />
+              <CopyRow label="Desc" value={meta.description} />
+              <CopyRow label="Tags" value={meta.tags.join(", ")} />
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between">
@@ -595,6 +628,29 @@ export function Composer({ itemId }: { itemId: string }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-slate-500 w-12 shrink-0">{label}</span>
+      <span dir="auto" className="flex-1 text-slate-300 break-words line-clamp-3">
+        {value}
+      </span>
+      <button
+        onClick={() => {
+          navigator.clipboard?.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }}
+        className="text-slate-500 hover:text-white shrink-0"
+      >
+        {copied ? "✓" : "copy"}
+      </button>
     </div>
   );
 }

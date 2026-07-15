@@ -32,11 +32,15 @@ export async function POST(
     const generated = await generateScript(
       settings,
       { title: item.title, content: item.content || item.summary },
-      { prompt: body.prompt, sceneCount: body.sceneCount },
+      { prompt: body.prompt, sceneCount: body.sceneCount, model: project.scriptModel || undefined },
     );
 
     // replace scenes; pre-assign article images round-robin as starting visuals
     const articleImages = item.media.filter((m) => m.type === "IMAGE");
+    // visualMode "search": pre-assign the article's own images as starting
+    // visuals; "ai": leave blank so each scene gets an AI-generated image at
+    // render time (or the user picks one).
+    const useArticleImages = project.visualMode !== "ai" && articleImages.length > 0;
     await prisma.scene.deleteMany({ where: { projectId: id } });
     await prisma.scene.createMany({
       data: generated.scenes.map((scene, i) => ({
@@ -44,7 +48,8 @@ export async function POST(
         order: i,
         text: scene.text,
         imageQuery: scene.imageQuery ?? "",
-        imageUrl: articleImages.length > 0 ? articleImages[i % articleImages.length].url : "",
+        imagePrompt: project.visualMode === "ai" ? (scene.imageQuery ?? scene.text.slice(0, 120)) : "",
+        imageUrl: useArticleImages ? articleImages[i % articleImages.length].url : "",
       })),
     });
     const updated = await prisma.videoProject.update({
