@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     const b = schema.parse(await req.json());
     let title = b.title ?? "";
     let body = b.body ?? "";
+    let lang = "";
     const projectId = b.projectId;
 
     if (b.itemId) {
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     if (b.projectId) {
       const project = await prisma.videoProject.findUnique({ where: { id: b.projectId } });
       if (project) {
+        lang = project.scriptLang || "";
         const item = await prisma.newsItem.findUnique({ where: { id: project.itemId } });
         if (item) {
           title = title || item.title;
@@ -46,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const settings = await getSettings(prisma);
-    const meta = await generateMetadata(settings, { title, body });
+    const meta = await generateMetadata(settings, { title, body, lang });
 
     if (projectId) {
       await prisma.videoProject.update({

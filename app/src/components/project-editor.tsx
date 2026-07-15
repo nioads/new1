@@ -7,6 +7,19 @@ import type { MusicTrackDto } from "@/components/music";
 
 const VIDEO_URL = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
 
+// Output languages for the generated narration. "" = match the article.
+// Kept in sync with SCRIPT_LANGUAGES in src/lib/ai.ts (server-only module,
+// so the list is mirrored here to keep it out of the client bundle).
+const SCRIPT_LANGS: Array<{ code: string; label: string }> = [
+  { code: "", label: "Auto (match article)" },
+  { code: "ar", label: "Arabic — العربية" },
+  { code: "en", label: "English" },
+  { code: "fr", label: "French — Français" },
+  { code: "es", label: "Spanish — Español" },
+  { code: "tr", label: "Turkish — Türkçe" },
+  { code: "de", label: "German — Deutsch" },
+];
+
 type SceneDto = {
   id: string;
   order: number;
@@ -47,6 +60,7 @@ type ProjectDto = {
   brandId: string | null;
   targetSeconds: number;
   scriptModel: string;
+  scriptLang: string;
   visualMode: string;
   smHighlight: string;
   smCaption: string;
@@ -125,6 +139,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         brandId: project.brandId,
         targetSeconds: project.targetSeconds,
         scriptModel: project.scriptModel,
+        scriptLang: project.scriptLang,
         visualMode: project.visualMode,
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
@@ -161,7 +176,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     const res = await fetch(`/api/projects/${project.id}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: project.scriptPrompt, sceneCount }),
+      body: JSON.stringify({ prompt: project.scriptPrompt, sceneCount, language: project.scriptLang }),
     });
     setGenerating(false);
     if (res.ok) {
@@ -415,6 +430,21 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             >
               <option value="search">Free search (SearxNG/stock)</option>
               <option value="ai">AI image generation</option>
+            </select>
+          </label>
+          <label className="block text-[11px] text-slate-500">
+            Script language
+            <select
+              value={project.scriptLang}
+              onChange={(e) => setProject({ ...project, scriptLang: e.target.value })}
+              className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+              title="Force the narration language. Auto keeps the article's language; pick a language to translate."
+            >
+              {SCRIPT_LANGS.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block text-[11px] text-slate-500">

@@ -254,6 +254,7 @@ model VideoProject {
   // pre-generation options
   targetSeconds Int          @default(60)
   scriptModel   String       @default("") // override the settings default
+  scriptLang    String       @default("") // "" = match article; "ar" | "en" | ...
   visualMode    String       @default("search") // search | ai
   // AI social metadata for this content
   smHighlight   String       @default("")

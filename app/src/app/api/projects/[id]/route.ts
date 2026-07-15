@@ -54,6 +54,7 @@ const patchSchema = z.object({
   brandId: z.string().nullable().optional(),
   targetSeconds: z.number().int().min(10).max(1800).optional(),
   scriptModel: z.string().optional(),
+  scriptLang: z.string().max(8).optional(),
   visualMode: z.enum(["search", "ai"]).optional(),
   scenes: z.array(sceneSchema).optional(),
   queueRender: z.boolean().optional(),
@@ -75,6 +76,7 @@ export async function PATCH(
     if (body.voiceId !== undefined) data.voiceId = body.voiceId;
     if (body.targetSeconds !== undefined) data.targetSeconds = body.targetSeconds;
     if (body.scriptModel !== undefined) data.scriptModel = body.scriptModel;
+    if (body.scriptLang !== undefined) data.scriptLang = body.scriptLang;
     if (body.visualMode !== undefined) data.visualMode = body.visualMode;
     if (body.captionsEnabled !== undefined) data.captionsEnabled = body.captionsEnabled;
     if (body.captionStyleId !== undefined) data.captionStyleId = body.captionStyleId;

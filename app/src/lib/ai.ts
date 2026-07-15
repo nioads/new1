@@ -55,15 +55,38 @@ export type GeneratedScript = { script: string; scenes: GeneratedScene[] };
 
 export function defaultScriptPrompt(aspect: string): string {
   return `You are a professional news video scriptwriter. Write a narration script for a ${aspect} social news video based on the article below.
-Rules: hook the viewer in the first sentence; one idea per scene; short spoken sentences; neutral news tone; keep the article's language (Arabic stays Arabic, English stays English).
+Rules: hook the viewer in the first sentence; one idea per scene; short spoken sentences; neutral news tone.
 Split the script into scenes. For each scene also provide a short English image search query describing the ideal visual.
 Respond ONLY with JSON: {"scenes":[{"text":"...","imageQuery":"..."}]}`;
+}
+
+// Supported output languages for generated text. "" = keep the source
+// article's language (auto). The image search query always stays English so
+// stock/media search works regardless of the narration language.
+export const SCRIPT_LANGUAGES: Array<{ code: string; label: string; name: string }> = [
+  { code: "", label: "Auto (match article)", name: "" },
+  { code: "ar", label: "Arabic", name: "Modern Standard Arabic (العربية الفصحى)" },
+  { code: "en", label: "English", name: "English" },
+  { code: "fr", label: "French", name: "French (Français)" },
+  { code: "es", label: "Spanish", name: "Spanish (Español)" },
+  { code: "tr", label: "Turkish", name: "Turkish (Türkçe)" },
+  { code: "de", label: "German", name: "German (Deutsch)" },
+];
+
+// Builds an explicit, hard-to-ignore language directive appended to the prompt.
+function languageDirective(code?: string): string {
+  if (!code) {
+    return "\n\nLANGUAGE: Write all narration text in the SAME language as the source article.";
+  }
+  const lang = SCRIPT_LANGUAGES.find((l) => l.code === code);
+  const name = lang?.name || code;
+  return `\n\nLANGUAGE (STRICT): Write ALL narration "text" fields in ${name}, EVEN IF the source article is written in a different language — translate the meaning faithfully into ${name}. Do not mix languages in the narration. Keep each "imageQuery" in English.`;
 }
 
 export async function generateScript(
   settings: Settings,
   article: { title: string; content: string },
-  opts: { prompt: string; sceneCount: number; model?: string },
+  opts: { prompt: string; sceneCount: number; model?: string; language?: string },
 ): Promise<GeneratedScript> {
   if (llmMocked(settings)) {
     // deterministic mock: split article text into sentence groups
@@ -82,7 +105,7 @@ export async function generateScript(
 
   const raw = await generateText(
     settings,
-    `${opts.prompt}\n\nTarget scene count: ${opts.sceneCount}\n\nARTICLE TITLE: ${article.title}\n\nARTICLE:\n${article.content.slice(0, 24000)}`,
+    `${opts.prompt}${languageDirective(opts.language)}\n\nTarget scene count: ${opts.sceneCount}\n\nARTICLE TITLE: ${article.title}\n\nARTICLE:\n${article.content.slice(0, 24000)}`,
     opts.model,
   );
   const parsed = extractJson(raw) as { scenes?: GeneratedScene[] };
@@ -120,11 +143,16 @@ export async function generateMetadata(
       tags: [...new Set(words.map((w) => w.toLowerCase()))],
     };
   }
+  const langCode = content.lang;
+  const langName = SCRIPT_LANGUAGES.find((l) => l.code === langCode)?.name;
+  const target = langName
+    ? `${langName} (translate if the source is in another language)`
+    : "the content's language";
   const prompt = `You are a social media editor. For the news content below, respond ONLY with JSON:
-{"highlight":"a very short punchy headline (max 8 words) to overlay on the image/video, in the content's language",
- "caption":"an engaging social media caption with 1-2 relevant emojis, in the content's language",
- "description":"a longer YouTube-style description (2-4 sentences), in the content's language",
- "tags":["8-12 lowercase hashtag-style keywords, no # symbol, mix of the content language and English"]}
+{"highlight":"a very short punchy headline (max 8 words) to overlay on the image/video, in ${target}",
+ "caption":"an engaging social media caption with 1-2 relevant emojis, in ${target}",
+ "description":"a longer YouTube-style description (2-4 sentences), in ${target}",
+ "tags":["8-12 lowercase hashtag-style keywords, no # symbol, mix of ${target} and English"]}
 
 TITLE: ${content.title}
 

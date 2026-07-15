@@ -9,6 +9,7 @@ import { generateScript } from "@/lib/ai";
 const schema = z.object({
   prompt: z.string().min(10).max(6000),
   sceneCount: z.number().int().min(2).max(120).default(6),
+  language: z.string().max(8).optional(),
 });
 
 // Generates the narration script and scene breakdown from the article.
@@ -29,10 +30,16 @@ export async function POST(
     if (!item) return NextResponse.json({ error: "Article not found" }, { status: 404 });
 
     const settings = await getSettings(prisma);
+    const language = body.language ?? project.scriptLang ?? "";
     const generated = await generateScript(
       settings,
       { title: item.title, content: item.content || item.summary },
-      { prompt: body.prompt, sceneCount: body.sceneCount, model: project.scriptModel || undefined },
+      {
+        prompt: body.prompt,
+        sceneCount: body.sceneCount,
+        model: project.scriptModel || undefined,
+        language,
+      },
     );
 
     // replace scenes; pre-assign article images round-robin as starting visuals
@@ -54,7 +61,7 @@ export async function POST(
     });
     const updated = await prisma.videoProject.update({
       where: { id },
-      data: { script: generated.script, scriptPrompt: body.prompt, status: "DRAFT", error: "" },
+      data: { script: generated.script, scriptPrompt: body.prompt, scriptLang: language, status: "DRAFT", error: "" },
       include: { scenes: { orderBy: { order: "asc" } } },
     });
     return NextResponse.json(updated);
