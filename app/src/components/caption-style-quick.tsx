@@ -90,10 +90,20 @@ export function CaptionStyleQuick({
       </button>
 
       {open && current && (
-        <div className="absolute z-20 mt-2 w-72 rounded-xl bg-slate-900 border border-slate-700 p-3 shadow-xl space-y-2" style={{ transform: "translateY(2.2rem)" }}>
-          <p className="text-[11px] text-slate-400">
-            Editing <span className="text-slate-200">{current.name}</span>
-          </p>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setOpen(false)}
+        >
+        <div
+          className="w-80 max-w-full rounded-xl bg-slate-900 border border-slate-700 p-4 shadow-2xl space-y-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-slate-400">
+              Editing <span className="text-slate-200">{current.name}</span>
+            </p>
+            <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-white text-sm">✕</button>
+          </div>
           <label className="block text-[11px] text-slate-400">
             Font size: {current.style.fontSize}
             <input
@@ -145,6 +155,7 @@ export function CaptionStyleQuick({
             </label>
           </div>
           <p className="text-[10px] text-slate-500">Changes save to this style and apply on the next preview / render.</p>
+        </div>
         </div>
       )}
     </span>

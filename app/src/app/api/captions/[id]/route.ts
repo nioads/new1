@@ -3,22 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api";
-
-const styleSchema = z.object({
-  fontSize: z.number().min(16).max(160),
-  baseColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  activeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  outlineColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  outlineWidth: z.number().min(0).max(12),
-  bold: z.boolean(),
-  uppercase: z.boolean(),
-  wordsPerGroup: z.number().int().min(1).max(12),
-  position: z.enum(["bottom", "middle", "top"]),
-});
+import { captionStyleSchema } from "@/lib/caption-style-schema";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(60).optional(),
-  style: styleSchema.optional(),
+  style: captionStyleSchema.optional(),
 });
 
 export async function PATCH(
@@ -33,7 +22,7 @@ export async function PATCH(
       where: { id },
       data: {
         ...(body.name ? { name: body.name.trim() } : {}),
-        ...(body.style ? { style: body.style } : {}),
+        ...(body.style ? { style: JSON.parse(JSON.stringify(body.style)) } : {}),
       },
     });
     return NextResponse.json(style);

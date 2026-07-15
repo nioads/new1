@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api";
+import { captionStyleSchema } from "@/lib/caption-style-schema";
 
 export async function GET() {
   try {
@@ -14,26 +15,14 @@ export async function GET() {
   }
 }
 
-const styleSchema = z.object({
-  fontSize: z.number().min(16).max(160),
-  baseColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  activeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  outlineColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  outlineWidth: z.number().min(0).max(12),
-  bold: z.boolean(),
-  uppercase: z.boolean(),
-  wordsPerGroup: z.number().int().min(1).max(12),
-  position: z.enum(["bottom", "middle", "top"]),
-});
-
-const createSchema = z.object({ name: z.string().min(1).max(60), style: styleSchema });
+const createSchema = z.object({ name: z.string().min(1).max(60), style: captionStyleSchema });
 
 export async function POST(req: NextRequest) {
   try {
     await requireSession();
     const body = createSchema.parse(await req.json());
     const style = await prisma.captionStyle.create({
-      data: { name: body.name.trim(), style: body.style },
+      data: { name: body.name.trim(), style: JSON.parse(JSON.stringify(body.style)) },
     });
     return NextResponse.json(style, { status: 201 });
   } catch (err) {
