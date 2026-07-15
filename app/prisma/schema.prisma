@@ -300,6 +300,9 @@ model Scene {
   zoom        Float        @default(1.0) // static zoom, >=1
   // word-level caption timings relative to scene audio: [{w,s,e}]
   words       Json?
+  // edited caption groups (scene-relative ms) — source of truth for captions
+  // when present; otherwise groups are derived from `words` at render time.
+  captionGroups Json?
 
   @@index([projectId, order])
 }

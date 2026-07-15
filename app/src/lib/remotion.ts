@@ -5,7 +5,7 @@
 import path from "path";
 import os from "os";
 import { existsSync } from "fs";
-import type { CaptionDocument } from "./captions";
+import { flattenGroups, type CaptionDocument } from "./captions";
 
 // Candidate system-chromium locations (Alpine names it differently across
 // versions). Remotion's bundled headless shell is glibc-only, so on musl we
@@ -59,7 +59,7 @@ export async function renderCaptionOverlay(
   doc: CaptionDocument,
   outPath: string,
 ): Promise<boolean> {
-  if (doc.cues.length === 0) return false;
+  if (flattenGroups(doc).length === 0) return false;
   try {
     const { selectComposition, renderMedia } = await import("@remotion/renderer");
     const browserExecutable = await ensureBrowser();

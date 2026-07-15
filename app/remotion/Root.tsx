@@ -2,16 +2,11 @@ import React from "react";
 import { Composition } from "remotion";
 import { CaptionOverlay, type CaptionDocument } from "./CaptionOverlay";
 
-// A tiny fallback doc so the composition is valid when opened without props
-// (e.g. in the Remotion studio). Real renders pass the project's document via
-// inputProps + calculateMetadata.
 const EMPTY_DOC: CaptionDocument = {
-  version: 1,
+  version: 2,
   width: 1080,
   height: 1920,
   fps: 25,
-  lang: "en",
-  dir: "ltr",
   style: {
     fontSize: 64,
     baseColor: "#ffffff",
@@ -19,12 +14,21 @@ const EMPTY_DOC: CaptionDocument = {
     outlineColor: "#000000",
     outlineWidth: 5,
     bold: true,
-    uppercase: true,
-    wordsPerGroup: 3,
     position: "middle",
+    highlightMode: "background",
+    activeBg: "#e11d48",
+    activeScale: 1.06,
   },
-  cues: [],
+  scenes: [],
 };
+
+function lastEndMs(doc: CaptionDocument): number {
+  let end = 0;
+  for (const s of doc.scenes) {
+    for (const g of s.caption.captionGroups) end = Math.max(end, s.offsetMs + g.endMs);
+  }
+  return end;
+}
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -38,10 +42,9 @@ export const RemotionRoot: React.FC = () => {
       defaultProps={{ doc: EMPTY_DOC }}
       calculateMetadata={({ props }) => {
         const doc = props.doc as CaptionDocument;
-        const lastEnd = doc.cues.reduce((m, c) => Math.max(m, c.end), 0);
         const fps = doc.fps || 25;
         return {
-          durationInFrames: Math.max(1, Math.ceil((lastEnd + 0.3) * fps)),
+          durationInFrames: Math.max(1, Math.ceil((lastEndMs(doc) / 1000 + 0.3) * fps)),
           fps,
           width: doc.width,
           height: doc.height,

@@ -18,9 +18,10 @@ import {
   estimateWords,
   BUILTIN_CAPTION_STYLES,
   type CaptionDocument,
+  type CaptionGroup,
   type CaptionStyleSpec,
   type CaptionWord,
-  type SceneCaption,
+  type SceneCaptionInput,
 } from "./captions";
 import { renderCaptionOverlay } from "./remotion";
 
@@ -248,7 +249,7 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     }
 
     // 1. render each scene to a uniform segment
-    const sceneCaptions: SceneCaption[] = [];
+    const sceneCaptions: SceneCaptionInput[] = [];
     for (const [i, scene] of scenes.entries()) {
       let imagePath: string | null = null;
       let isVideoVisual = false;
@@ -286,12 +287,20 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
         outPath: segPath,
         isVideoVisual,
       });
-      // caption timings: scene audio starts at the segment start
+      // caption timings: scene audio starts at the segment start. Use the
+      // scene's edited caption groups when present (source of truth); otherwise
+      // fall back to word timings (Whisper/estimated) grouped at render time.
       if (scene.text.trim()) {
         const words =
           (scene.words as CaptionWord[] | null) ??
           estimateWords(scene.text, Math.max(1, segDuration - 0.6));
-        sceneCaptions.push({ offset: captionOffset, words });
+        const groups = (scene.captionGroups as CaptionGroup[] | null) ?? undefined;
+        sceneCaptions.push({
+          sceneId: scene.id,
+          offsetSec: captionOffset,
+          words,
+          groups: groups && groups.length ? groups : undefined,
+        });
       }
       captionOffset += segDuration;
       total += segDuration;
@@ -451,7 +460,7 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     // platform-native captions). Stored alongside the render.
     let captionSrtUrl = "";
     let captionVttUrl = "";
-    if (captionDoc && captionDoc.cues.length > 0) {
+    if (captionDoc && captionDoc.scenes.some((s) => s.caption.captionGroups.length > 0)) {
       const srt = await storeFile(
         brand,
         Buffer.from(buildSrt(captionDoc), "utf8"),

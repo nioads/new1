@@ -1,26 +1,95 @@
 // Caption pipeline.
 //
-// Architecture: a single Canonical Caption JSON (CaptionDocument) is the source
-// of truth. It is produced once from scene word timings, then fed to three
-// independent renderers:
-//   • Remotion       — premium word-by-word animated captions (headless Chrome)
-//   • ASS / libass    — fast burned-in captions rendered by ffmpeg (fallback)
-//   • SRT / VTT       — sidecar files for accessibility / platform captions
-// All three read the exact same cues, so what you preview is what every output
-// shows. libass shapes Arabic/RTL correctly; Remotion uses bundled Noto Naskh.
+// Model: a scene's word-level timings are divided into short, readable CAPTION
+// GROUPS (2–5 words, semantic + timing aware). At playback exactly one group is
+// on screen; the whole group stays visible while its words are spoken and only
+// the currently-pronounced word is highlighted; the group disappears when its
+// last word ends and the next group takes over.
+//
+// Hierarchy:  Video → Scene → Caption Group → Word
+//
+// The grouped model (Canonical Caption JSON) is the single source of truth fed
+// to every renderer:
+//   • Remotion  — premium progressive group + active-word render (headless Chrome)
+//   • libass    — ffmpeg burned-in fallback (same groups/timings)
+//   • SRT / VTT — one cue per group (accessibility / platform captions)
 
-export type CaptionWord = { w: string; s: number; e: number }; // seconds, scene-relative
+// ── Raw word timing (seconds, scene-relative) — from Whisper or estimation ──
+export type CaptionWord = { w: string; s: number; e: number };
 
+// ── Rich caption model (milliseconds) ───────────────────────────────────────
+export type Direction = "rtl" | "ltr";
+
+export type WordUnit = {
+  id: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  direction: Direction;
+};
+
+export type CaptionGroup = {
+  groupId: string;
+  text: string;
+  startMs: number; // scene-relative
+  endMs: number;
+  direction: Direction;
+  words: WordUnit[];
+  locked?: boolean; // user locked this phrase against regrouping
+};
+
+export type SceneCaptionData = {
+  sceneId: string;
+  sceneStartMs: number; // scene-relative origin (0)
+  sceneEndMs: number;
+  language: "ar" | "en";
+  baseDirection: Direction;
+  fullTranscript: string;
+  captionGroups: CaptionGroup[];
+};
+
+// ── Style / behavior spec ───────────────────────────────────────────────────
 export type CaptionStyleSpec = {
-  fontSize: number; // relative to 1080p height; scaled at build time
-  baseColor: string; // #rrggbb
+  // typography
+  fontSize: number; // relative to 1080p height
+  baseColor: string;
   activeColor: string;
   outlineColor: string;
   outlineWidth: number;
   bold: boolean;
   uppercase: boolean;
-  wordsPerGroup: number;
-  position: "bottom" | "middle" | "top";
+  position: "top" | "upper" | "middle" | "lower" | "bottom";
+  lineHeight?: number;
+  maxWidthPercent?: number; // default 85
+  maxLines?: number; // default 2
+  // grouping
+  minWords?: number; // default 2
+  maxWords?: number; // default 5
+  targetWords?: number; // preferred size, default 3
+  minDurationMs?: number; // default 700
+  maxDurationMs?: number; // default 4000
+  targetDurationMs?: number; // default 3000
+  followVoicePauses?: boolean; // default true
+  keepNumbersWithUnits?: boolean; // default true
+  allowSingleWordEmphasisGroup?: boolean; // default true
+  // active-word highlight
+  highlightMode?: "color" | "background" | "pill" | "underline"; // default background
+  activeBg?: string; // default activeColor-derived
+  activeScale?: number; // default 1.06
+  transitionMs?: number; // default 140
+  holdUntilNextWord?: boolean; // default true
+  // group background box
+  boxBackground?: "none" | "group" | "active"; // default none
+  boxColor?: string;
+  boxOpacity?: number;
+  boxRadius?: number;
+  boxPadding?: number;
+  // motion
+  groupEntrance?: "none" | "fade" | "pop"; // default pop
+  groupExit?: "none" | "fade"; // default fade
+  reducedMotion?: boolean;
+  // legacy (still read if present)
+  wordsPerGroup?: number;
 };
 
 export const BUILTIN_CAPTION_STYLES: Array<{ name: string; style: CaptionStyleSpec }> = [
@@ -33,9 +102,12 @@ export const BUILTIN_CAPTION_STYLES: Array<{ name: string; style: CaptionStyleSp
       outlineColor: "#000000",
       outlineWidth: 5,
       bold: true,
-      uppercase: true,
-      wordsPerGroup: 3,
+      uppercase: false,
       position: "middle",
+      highlightMode: "background",
+      activeBg: "#e11d48",
+      activeScale: 1.08,
+      targetWords: 3,
     },
   },
   {
@@ -43,13 +115,15 @@ export const BUILTIN_CAPTION_STYLES: Array<{ name: string; style: CaptionStyleSp
     style: {
       fontSize: 46,
       baseColor: "#ffffff",
-      activeColor: "#ffffff",
+      activeColor: "#38bdf8",
       outlineColor: "#000000",
       outlineWidth: 3,
       bold: true,
       uppercase: false,
-      wordsPerGroup: 5,
-      position: "bottom",
+      position: "lower",
+      highlightMode: "color",
+      activeScale: 1.05,
+      targetWords: 4,
     },
   },
   {
@@ -57,46 +131,37 @@ export const BUILTIN_CAPTION_STYLES: Array<{ name: string; style: CaptionStyleSp
     style: {
       fontSize: 36,
       baseColor: "#e2e8f0",
-      activeColor: "#e2e8f0",
+      activeColor: "#ffffff",
       outlineColor: "#0f172a",
       outlineWidth: 2,
       bold: false,
       uppercase: false,
-      wordsPerGroup: 7,
       position: "bottom",
+      highlightMode: "underline",
+      activeScale: 1.0,
+      targetWords: 4,
     },
   },
 ];
 
-// ── Canonical Caption JSON ────────────────────────────────────────────────
-// Absolute-timed, renderer-agnostic representation shared by every output.
+// Fills grouping-relevant defaults onto a (possibly partial) style spec.
+export function resolveGrouping(spec: CaptionStyleSpec) {
+  return {
+    minWords: spec.minWords ?? 2,
+    maxWords: spec.maxWords ?? Math.max(spec.minWords ?? 2, spec.wordsPerGroup ?? 5),
+    targetWords: spec.targetWords ?? Math.min(3, spec.wordsPerGroup ?? 3),
+    minDurationMs: spec.minDurationMs ?? 700,
+    maxDurationMs: spec.maxDurationMs ?? 4000,
+    targetDurationMs: spec.targetDurationMs ?? 3000,
+    followVoicePauses: spec.followVoicePauses ?? true,
+    keepNumbersWithUnits: spec.keepNumbersWithUnits ?? true,
+    allowSingleWordEmphasisGroup: spec.allowSingleWordEmphasisGroup ?? true,
+  };
+}
 
-export type CaptionToken = { text: string; start: number; end: number }; // absolute seconds
-export type CaptionCue = {
-  start: number; // absolute seconds
-  end: number;
-  text: string; // joined display text of the cue
-  tokens: CaptionToken[]; // word-level timing for karaoke highlighting
-  lang: "ar" | "en";
-  dir: "rtl" | "ltr";
-};
-export type CaptionDocument = {
-  version: 1;
-  width: number;
-  height: number;
-  fps: number;
-  lang: "ar" | "en"; // dominant language of the whole document
-  dir: "rtl" | "ltr";
-  style: CaptionStyleSpec;
-  cues: CaptionCue[];
-};
-
-export type SceneCaption = {
-  offset: number; // absolute start time of the scene's audio in the final video
-  words: CaptionWord[];
-};
-
+// ── Script / direction detection ─────────────────────────────────────────────
 const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+const DIGIT_RE = /[0-9٠-٩۰-۹]/;
 
 function arabicRatio(text: string): number {
   let ar = 0;
@@ -109,108 +174,252 @@ function arabicRatio(text: string): number {
   return total > 0 ? ar / total : 0;
 }
 
-// Builds the Canonical Caption JSON from per-scene word timings. Words are
-// grouped into cues of `wordsPerGroup`; each cue is language-detected on its
-// own so a bilingual video can mix RTL Arabic and LTR English cues correctly.
+function wordDirection(text: string): Direction {
+  // A word is RTL only if it actually contains Arabic letters; pure numbers,
+  // Latin words, acronyms and units stay LTR so bidi runs isolate correctly.
+  return ARABIC_RE.test(text) ? "rtl" : "ltr";
+}
+
+function baseDirection(text: string): Direction {
+  return arabicRatio(text) > 0.3 ? "rtl" : "ltr";
+}
+
+// units/currency that should stay glued to an adjacent number
+const UNIT_TOKENS = new Set([
+  "%", "$", "€", "£", "M", "K", "B", "m", "km", "kg", "cm", "mm", "mph", "fps",
+  "مليون", "ألف", "الف", "مليار", "متر", "كم", "كغ", "دقيقة", "ثانية", "ساعة", "بالمئة",
+]);
+
+function isNumeric(t: string): boolean {
+  return DIGIT_RE.test(t) && /^[\d٠-٩۰-۹.,:/%\-–MKB$€£]+$/i.test(t);
+}
+function isUnit(t: string): boolean {
+  return UNIT_TOKENS.has(t) || UNIT_TOKENS.has(t.replace(/[.,]$/, ""));
+}
+function endsSentence(t: string): boolean {
+  return /[.!?؟۔]["'»)\]]?$/.test(t);
+}
+function hasTrailingPunct(t: string): boolean {
+  return /[,،؛:;]["'»)\]]?$/.test(t);
+}
+
+const ms = (sec: number) => Math.round(sec * 1000);
+
+// Glue rule: keep number↔unit and number↔number adjacent (don't break between).
+function shouldGlue(a: CaptionWord, b: CaptionWord, keepNumbersWithUnits: boolean): boolean {
+  if (!keepNumbersWithUnits) return false;
+  if (isNumeric(a.w) && (isUnit(b.w) || isNumeric(b.w))) return true;
+  if (isUnit(a.w) && isNumeric(b.w)) return true;
+  return false;
+}
+
+let __wid = 0;
+function nextId(prefix: string): string {
+  __wid = (__wid + 1) % 1_000_000;
+  return `${prefix}-${__wid.toString(36)}`;
+}
+
+// ── Semantic-ish grouper (heuristic) ────────────────────────────────────────
+// Divides scene words into caption groups honoring: preferred size, natural
+// pauses, sentence/clause punctuation, number+unit gluing, and min/max duration.
+// The AI grouper (ai.ts) can override this with meaning-based boundaries; both
+// produce the same CaptionGroup[] shape.
+export function groupWords(words: CaptionWord[], spec: CaptionStyleSpec): CaptionGroup[] {
+  const g = resolveGrouping(spec);
+  const clean = words.map((w) => ({ ...w, w: (spec.uppercase ? w.w.toUpperCase() : w.w).trim() })).filter((w) => w.w);
+  if (clean.length === 0) return [];
+
+  const PAUSE_MS = 260; // a real gap between words → phrase boundary
+  const chunks: CaptionWord[][] = [];
+  let cur: CaptionWord[] = [];
+
+  for (let i = 0; i < clean.length; i++) {
+    const w = clean[i];
+    cur.push(w);
+    const next = clean[i + 1];
+    const groupDurMs = ms(w.e) - ms(cur[0].s);
+    const gapMs = next ? ms(next.s) - ms(w.e) : Infinity;
+    const glue = next ? shouldGlue(w, next, g.keepNumbersWithUnits) : false;
+    const longEnough = cur.length >= g.minWords;
+    const atMax = cur.length >= g.maxWords;
+    const overMaxDur = groupDurMs >= g.maxDurationMs;
+
+    let boundary = false;
+    if (glue) {
+      boundary = false; // never split a number from its unit
+    } else if (atMax || overMaxDur) {
+      boundary = true;
+    } else if (longEnough && (endsSentence(w.w) || hasTrailingPunct(w.w))) {
+      boundary = true; // natural clause end
+    } else if (longEnough && g.followVoicePauses && gapMs >= PAUSE_MS) {
+      boundary = true; // voice pause
+    } else if (cur.length >= g.targetWords && groupDurMs >= g.targetDurationMs * 0.5) {
+      boundary = true; // reached preferred size with reasonable duration
+    }
+
+    if (boundary && next) {
+      chunks.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) chunks.push(cur);
+
+  // merge sub-minimum-duration groups (except a legit one-word emphasis group)
+  // into their previous neighbor when there's room. A one-word final group is
+  // kept as a deliberate conclusion when single-word emphasis is allowed.
+  const merged: CaptionWord[][] = [];
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    const isLastChunk = c === chunks.length - 1;
+    const durMs = ms(chunk[chunk.length - 1].e) - ms(chunk[0].s);
+    const lastWord = chunk[chunk.length - 1].w;
+    // conclusion emphasis: sentence-terminated, or the very last words of the scene
+    const isEmphasis =
+      chunk.length === 1 &&
+      g.allowSingleWordEmphasisGroup &&
+      (endsSentence(lastWord) || isLastChunk);
+    const prev = merged[merged.length - 1];
+    const tooShort = durMs < g.minDurationMs && !isEmphasis;
+    const singleNonEmphasis = chunk.length === 1 && !isEmphasis;
+    if ((tooShort || singleNonEmphasis) && prev && prev.length + chunk.length <= g.maxWords) {
+      prev.push(...chunk);
+    } else {
+      merged.push(chunk);
+    }
+  }
+
+  return merged.map((chunk) => {
+    const wordUnits: WordUnit[] = chunk.map((w) => ({
+      id: nextId("w"),
+      text: w.w,
+      startMs: ms(w.s),
+      endMs: ms(w.e),
+      direction: wordDirection(w.w),
+    }));
+    const text = wordUnits.map((w) => w.text).join(" ");
+    return {
+      groupId: nextId("g"),
+      text,
+      startMs: wordUnits[0].startMs,
+      endMs: Math.max(wordUnits[wordUnits.length - 1].endMs, wordUnits[0].startMs + 200),
+      direction: baseDirection(text),
+      words: wordUnits,
+    };
+  });
+}
+
+// Builds the self-contained per-scene caption JSON (scene-relative ms).
+export function buildSceneCaption(
+  sceneId: string,
+  words: CaptionWord[],
+  spec: CaptionStyleSpec,
+  groups?: CaptionGroup[],
+): SceneCaptionData {
+  const captionGroups = groups && groups.length ? groups : groupWords(words, spec);
+  const fullTranscript = captionGroups.map((grp) => grp.text).join(" ");
+  const endMs = captionGroups.reduce((m, grp) => Math.max(m, grp.endMs), 0);
+  return {
+    sceneId,
+    sceneStartMs: 0,
+    sceneEndMs: endMs,
+    language: baseDirection(fullTranscript) === "rtl" ? "ar" : "en",
+    baseDirection: baseDirection(fullTranscript),
+    fullTranscript,
+    captionGroups,
+  };
+}
+
+// ── Whole-video document ─────────────────────────────────────────────────────
+export type CaptionDocument = {
+  version: 2;
+  width: number;
+  height: number;
+  fps: number;
+  style: CaptionStyleSpec;
+  scenes: Array<{ offsetMs: number; caption: SceneCaptionData }>;
+};
+
+export type SceneCaptionInput = {
+  sceneId: string;
+  offsetSec: number; // absolute start of this scene's audio in the final video
+  words: CaptionWord[];
+  groups?: CaptionGroup[]; // pre-grouped (edited) — used verbatim if present
+};
+
 export function buildCaptionDocument(
-  scenes: SceneCaption[],
+  scenes: SceneCaptionInput[],
   spec: CaptionStyleSpec,
   width: number,
   height: number,
   fps = 25,
 ): CaptionDocument {
-  const cues: CaptionCue[] = [];
-  const groupSize = Math.max(1, spec.wordsPerGroup);
-
-  for (const scene of scenes) {
-    const words = scene.words
-      .map((w) => ({ ...w, w: (spec.uppercase ? w.w.toUpperCase() : w.w).trim() }))
-      .filter((w) => w.w);
-    for (let g = 0; g < words.length; g += groupSize) {
-      const group = words.slice(g, g + groupSize);
-      if (group.length === 0) continue;
-      const tokens: CaptionToken[] = group.map((w) => ({
-        text: w.w,
-        start: scene.offset + w.s,
-        end: scene.offset + w.e,
-      }));
-      const start = tokens[0].start;
-      const end = Math.max(tokens[tokens.length - 1].end, start + 0.2);
-      const text = group.map((w) => w.w).join(" ");
-      const rtl = arabicRatio(text) > 0.3;
-      cues.push({
-        start,
-        end,
-        text,
-        tokens,
-        lang: rtl ? "ar" : "en",
-        dir: rtl ? "rtl" : "ltr",
-      });
-    }
-  }
-
-  const allText = cues.map((c) => c.text).join(" ");
-  const docRtl = arabicRatio(allText) > 0.3;
   return {
-    version: 1,
+    version: 2,
     width,
     height,
     fps,
-    lang: docRtl ? "ar" : "en",
-    dir: docRtl ? "rtl" : "ltr",
     style: spec,
-    cues,
+    scenes: scenes.map((s) => ({
+      offsetMs: ms(s.offsetSec),
+      caption: buildSceneCaption(s.sceneId, s.words, spec, s.groups),
+    })),
   };
 }
 
-// ── ASS / libass renderer (fallback) ───────────────────────────────────────
+// Absolute-timed groups across the whole video (for burned renderers).
+export type AbsGroup = {
+  groupId: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  direction: Direction;
+  words: WordUnit[]; // absolute ms
+};
 
-function assColor(hex: string): string {
-  // ASS uses &HBBGGRR&
-  const m = hex.replace("#", "");
-  const r = m.slice(0, 2), g = m.slice(2, 4), b = m.slice(4, 6);
-  return `&H00${b}${g}${r}`.toUpperCase();
+export function flattenGroups(doc: CaptionDocument): AbsGroup[] {
+  const out: AbsGroup[] = [];
+  for (const s of doc.scenes) {
+    for (const grp of s.caption.captionGroups) {
+      out.push({
+        groupId: grp.groupId,
+        text: grp.text,
+        startMs: s.offsetMs + grp.startMs,
+        endMs: s.offsetMs + grp.endMs,
+        direction: grp.direction,
+        words: grp.words.map((w) => ({ ...w, startMs: s.offsetMs + w.startMs, endMs: s.offsetMs + w.endMs })),
+      });
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
 }
 
-function assTime(seconds: number): string {
-  const t = Math.max(0, seconds);
+// ── ASS / libass renderer (fallback) ─────────────────────────────────────────
+function assColor(hex: string): string {
+  const m = hex.replace("#", "");
+  const r = m.slice(0, 2), gg = m.slice(2, 4), b = m.slice(4, 6);
+  return `&H00${b}${gg}${r}`.toUpperCase();
+}
+function assTime(msVal: number): string {
+  const t = Math.max(0, msVal) / 1000;
   const h = Math.floor(t / 3600);
   const m = Math.floor((t % 3600) / 60);
   const s = Math.floor(t % 60);
   const cs = Math.floor((t % 1) * 100);
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
-
 function escapeAss(text: string): string {
   return text.replace(/\\/g, "").replace(/[{}]/g, "").replace(/\n/g, " ");
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function clockTime(seconds: number, comma: boolean): string {
-  const t = Math.max(0, seconds);
-  const h = Math.floor(t / 3600);
-  const m = Math.floor((t % 3600) / 60);
-  const s = Math.floor(t % 60);
-  const ms = Math.round((t % 1) * 1000);
-  const sep = comma ? "," : ".";
-  return `${pad2(h)}:${pad2(m)}:${pad2(s)}${sep}${String(ms).padStart(3, "0")}`;
-}
-
-// Renders the canonical document to ASS. libass shapes Arabic/RTL text and
-// draws the karaoke word highlight; we pick a font that actually carries the
-// glyphs (Noto Naskh Arabic has complete lam-alef ligature coverage that the
-// Sans bold weight drops and would render as tofu boxes).
 export function buildAss(doc: CaptionDocument): string {
   const { width, height, style: spec } = doc;
   const scale = height / 1080;
   const fontSize = Math.round(spec.fontSize * scale * (width > height ? 1 : 1.15));
-  const alignment = spec.position === "top" ? 8 : spec.position === "middle" ? 5 : 2;
-  const marginV = spec.position === "middle" ? 0 : Math.round(height * 0.08);
-  const fontName = doc.dir === "rtl" ? "Noto Naskh Arabic" : "Noto Sans";
-  const sideMargin = Math.round(width * 0.06);
+  const align = spec.position === "top" || spec.position === "upper" ? 8 : spec.position === "middle" ? 5 : 2;
+  const marginV = spec.position === "middle" ? 0 : Math.round(height * (spec.position === "upper" ? 0.2 : 0.08));
+  const rtl = baseDirection(doc.scenes.map((s) => s.caption.fullTranscript).join(" ")) === "rtl";
+  const fontName = rtl ? "Noto Naskh Arabic" : "Noto Sans";
+  const sideMargin = Math.round(width * (1 - (spec.maxWidthPercent ?? 85) / 100) / 2);
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -222,25 +431,23 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,${fontName},${fontSize},${assColor(spec.baseColor)},${assColor(spec.baseColor)},${assColor(spec.outlineColor)},&H96000000,${spec.bold ? -1 : 0},0,0,0,100,100,0,0,1,${Math.round(spec.outlineWidth * scale)},2,${alignment},${sideMargin},${sideMargin},${marginV},1
+Style: Cap,${fontName},${fontSize},${assColor(spec.baseColor)},${assColor(spec.baseColor)},${assColor(spec.outlineColor)},&H96000000,${spec.bold ? -1 : 0},0,0,0,100,100,0,0,1,${Math.round(spec.outlineWidth * scale)},2,${align},${sideMargin},${sideMargin},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  const lines: string[] = [];
   const active = assColor(spec.activeColor);
   const base = assColor(spec.baseColor);
-
-  for (const cue of doc.cues) {
-    const tokens = cue.tokens.map((t) => ({ ...t, text: escapeAss(t.text) })).filter((t) => t.text.trim());
-    // one dialogue line per word: whole cue visible, active word tinted
-    for (let i = 0; i < tokens.length; i++) {
-      const start = tokens[i].start;
-      const end = i + 1 < tokens.length ? tokens[i + 1].start : tokens[tokens.length - 1].end;
+  const lines: string[] = [];
+  for (const grp of flattenGroups(doc)) {
+    const words = grp.words.map((w) => ({ ...w, text: escapeAss(w.text) })).filter((w) => w.text.trim());
+    for (let i = 0; i < words.length; i++) {
+      const start = words[i].startMs;
+      const end = i + 1 < words.length ? words[i + 1].startMs : grp.endMs;
       if (end <= start) continue;
-      const text = tokens
-        .map((t, j) => (j === i && active !== base ? `{\\c${active}}${t.text}{\\c${base}}` : t.text))
+      const text = words
+        .map((w, j) => (j === i && active !== base ? `{\\c${active}}${w.text}{\\c${base}}` : w.text))
         .join(" ");
       lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${text}`);
     }
@@ -248,32 +455,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   return header + lines.join("\n") + "\n";
 }
 
-// ── SRT / VTT sidecar export (accessibility / platform captions) ────────────
-// One entry per cue (no per-word flashing — sidecar formats are read as blocks).
+// ── SRT / VTT (one cue per group) ────────────────────────────────────────────
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+function clockTime(msVal: number, comma: boolean): string {
+  const t = Math.max(0, msVal) / 1000;
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.floor(t % 60);
+  const msRem = Math.round((t % 1) * 1000);
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}${comma ? "," : "."}${String(msRem).padStart(3, "0")}`;
+}
 
 export function buildSrt(doc: CaptionDocument): string {
-  return doc.cues
-    .map((cue, i) => {
-      const text = cue.dir === "rtl" ? `‫${cue.text}‬` : cue.text;
-      return `${i + 1}\n${clockTime(cue.start, true)} --> ${clockTime(cue.end, true)}\n${text}`;
+  const groups = flattenGroups(doc);
+  return groups
+    .map((grp, i) => {
+      const text = grp.direction === "rtl" ? `‫${grp.text}‬` : grp.text;
+      return `${i + 1}\n${clockTime(grp.startMs, true)} --> ${clockTime(grp.endMs, true)}\n${text}`;
     })
     .join("\n\n") + "\n";
 }
 
 export function buildVtt(doc: CaptionDocument): string {
-  const body = doc.cues
-    .map((cue) => {
-      const dir = cue.dir === "rtl" ? " direction:rtl" : "";
-      const text = cue.dir === "rtl" ? `‫${cue.text}‬` : cue.text;
-      return `${clockTime(cue.start, false)} --> ${clockTime(cue.end, false)}${dir}\n${text}`;
+  const body = flattenGroups(doc)
+    .map((grp) => {
+      const dir = grp.direction === "rtl" ? " direction:rtl" : "";
+      const text = grp.direction === "rtl" ? `‫${grp.text}‬` : grp.text;
+      return `${clockTime(grp.startMs, false)} --> ${clockTime(grp.endMs, false)}${dir}\n${text}`;
     })
     .join("\n\n");
   return `WEBVTT\n\n${body}\n`;
 }
 
-// ── Word timing estimation ──────────────────────────────────────────────────
-// Fallback word timing: distribute words across a known duration weighted by
-// word length. Used in mock mode and when Whisper output is unavailable.
+// ── Word timing estimation (mock / no-Whisper fallback) ──────────────────────
 export function estimateWords(text: string, duration: number): CaptionWord[] {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return [];
