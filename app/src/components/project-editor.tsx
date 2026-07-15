@@ -20,6 +20,10 @@ type SceneDto = {
   kenburns: string;
   transition: string;
   durationSec: number;
+  fit: string;
+  focusX: number;
+  focusY: number;
+  zoom: number;
 };
 
 type VoiceDto = { id: string; name: string; previewUrl: string; labels: string };
@@ -120,6 +124,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           transition: s.transition,
           voiceId: s.voiceId,
           durationSec: s.durationSec,
+          fit: s.fit,
+          focusX: s.focusX,
+          focusY: s.focusY,
+          zoom: s.zoom,
         })),
         ...extra,
       }),
@@ -350,7 +358,11 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               <div className="w-44 shrink-0 space-y-2">
                 <button
                   onClick={() => setPickerScene(pickerScene === scene.id ? null : scene.id)}
-                  className="block w-full aspect-video rounded-lg overflow-hidden border border-slate-700 hover:border-indigo-500 bg-slate-800 relative"
+                  className="block w-full rounded-lg overflow-hidden border border-slate-700 hover:border-indigo-500 bg-slate-800 relative mx-auto"
+                  style={{
+                    aspectRatio: project.aspect === "9:16" ? "9 / 16" : "16 / 9",
+                    maxWidth: project.aspect === "9:16" ? "100px" : "176px",
+                  }}
                   title="Change visual"
                 >
                   {scene.imageUrl && VIDEO_URL.test(scene.imageUrl) ? (
@@ -359,19 +371,83 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                         src={proxied(scene.imageUrl)}
                         muted
                         preload="metadata"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full"
+                        style={{
+                          objectFit: scene.fit === "cover" ? "cover" : "contain",
+                          objectPosition: `${(scene.focusX ?? 0.5) * 100}% ${(scene.focusY ?? 0.5) * 100}%`,
+                        }}
                       />
                       <span className="absolute bottom-1 right-1 text-[10px] bg-black/70 rounded px-1">
-                        🎬 video
+                        🎬
                       </span>
                     </>
                   ) : scene.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={proxied(scene.imageUrl)} alt="" className="w-full h-full object-cover" />
+                    <img
+                      src={proxied(scene.imageUrl)}
+                      alt=""
+                      className="w-full h-full"
+                      style={{
+                        objectFit: scene.fit === "cover" ? "cover" : "contain",
+                        objectPosition: `${(scene.focusX ?? 0.5) * 100}% ${(scene.focusY ?? 0.5) * 100}%`,
+                      }}
+                    />
                   ) : (
-                    <span className="text-[11px] text-slate-500">no visual — click to pick</span>
+                    <span className="text-[11px] text-slate-500 flex items-center justify-center h-full p-2 text-center">
+                      pick visual
+                    </span>
                   )}
                 </button>
+                <select
+                  value={scene.fit}
+                  onChange={(e) => patchLocalScene(scene.id, { fit: e.target.value })}
+                  className="w-full rounded bg-slate-800 border border-slate-700 px-1 py-1 text-[11px]"
+                  title="How the image fits the frame"
+                >
+                  <option value="cover">Fill (crop)</option>
+                  <option value="blur">Fit + blurred bg</option>
+                  <option value="contain">Fit (letterbox)</option>
+                </select>
+                {scene.fit === "cover" && (
+                  <div className="space-y-1">
+                    <label className="block text-[10px] text-slate-500">
+                      Focus ↔
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.02}
+                        value={scene.focusX ?? 0.5}
+                        onChange={(e) => patchLocalScene(scene.id, { focusX: Number(e.target.value) })}
+                        className="w-full accent-indigo-500"
+                      />
+                    </label>
+                    <label className="block text-[10px] text-slate-500">
+                      Focus ↕
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.02}
+                        value={scene.focusY ?? 0.5}
+                        onChange={(e) => patchLocalScene(scene.id, { focusY: Number(e.target.value) })}
+                        className="w-full accent-indigo-500"
+                      />
+                    </label>
+                    <label className="block text-[10px] text-slate-500">
+                      Zoom {(scene.zoom ?? 1).toFixed(2)}×
+                      <input
+                        type="range"
+                        min={1}
+                        max={2.5}
+                        step={0.05}
+                        value={scene.zoom ?? 1}
+                        onChange={(e) => patchLocalScene(scene.id, { zoom: Number(e.target.value) })}
+                        className="w-full accent-indigo-500"
+                      />
+                    </label>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-1.5">
                   <select
                     value={scene.kenburns}

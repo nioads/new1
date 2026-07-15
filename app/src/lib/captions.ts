@@ -86,6 +86,22 @@ export type SceneCaption = {
   words: CaptionWord[];
 };
 
+const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+
+function isMostlyArabic(scenes: SceneCaption[]): boolean {
+  let ar = 0;
+  let total = 0;
+  for (const s of scenes)
+    for (const w of s.words) {
+      for (const ch of w.w) {
+        if (/\s/.test(ch)) continue;
+        total++;
+        if (ARABIC_RE.test(ch)) ar++;
+      }
+    }
+  return total > 0 && ar / total > 0.3;
+}
+
 export function buildAss(
   scenes: SceneCaption[],
   spec: CaptionStyleSpec,
@@ -96,17 +112,27 @@ export function buildAss(
   const fontSize = Math.round(spec.fontSize * scale * (width > height ? 1 : 1.15));
   const alignment = spec.position === "top" ? 8 : spec.position === "middle" ? 5 : 2;
   const marginV = spec.position === "middle" ? 0 : Math.round(height * 0.08);
+  // Pick a font family that actually shapes the script — libass renders tofu
+  // (boxes) when the chosen family lacks the glyphs. Noto Sans Arabic covers
+  // Arabic with proper joining/shaping; Latin content uses Noto Sans.
+  // Noto Naskh Arabic has complete ligature coverage (incl. lam-alef forms
+  // that the Sans bold weight drops, which showed as tofu boxes); use it for
+  // Arabic, Noto Sans for Latin.
+  const arabic = isMostlyArabic(scenes);
+  const fontName = arabic ? "Noto Naskh Arabic" : "Noto Sans";
+  const sideMargin = Math.round(width * 0.06);
 
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}
 PlayResY: ${height}
-WrapStyle: 0
+WrapStyle: 1
 ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Noto Sans,${fontSize},${assColor(spec.baseColor)},${assColor(spec.baseColor)},${assColor(spec.outlineColor)},&H96000000,${spec.bold ? -1 : 0},0,0,0,100,100,0,0,1,${Math.round(spec.outlineWidth * scale)},1,${alignment},60,60,${marginV},1
+Style: Cap,${fontName},${fontSize},${assColor(spec.baseColor)},${assColor(spec.baseColor)},${assColor(spec.outlineColor)},&H96000000,${spec.bold ? -1 : 0},0,0,0,100,100,0,0,1,${Math.round(spec.outlineWidth * scale)},2,${alignment},${sideMargin},${sideMargin},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

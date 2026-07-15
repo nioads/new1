@@ -279,6 +279,12 @@ model Scene {
   kenburns    String       @default("in") // in | out | left | right | none
   transition  String       @default("fade") // fade | cut (to next scene)
   durationSec Float        @default(4)
+  // framing when the source aspect differs from the video:
+  // fit: cover (fill+crop) | blur (fit + blurred bg) | contain (letterbox)
+  fit         String       @default("cover")
+  focusX      Float        @default(0.5) // crop focal point, 0..1
+  focusY      Float        @default(0.5)
+  zoom        Float        @default(1.0) // static zoom, >=1
   // word-level caption timings relative to scene audio: [{w,s,e}]
   words       Json?
 

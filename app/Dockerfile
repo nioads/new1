@@ -1,6 +1,10 @@
 FROM node:22-alpine AS base
-# ffmpeg (renders), fonts with Arabic coverage (burned-in captions via libass)
-RUN apk add --no-cache openssl ffmpeg fontconfig font-noto font-noto-arabic ttf-dejavu
+# ffmpeg (renders) + fonts with full Arabic coverage for burned-in captions
+# via libass. font-noto-arabic provides "Noto Sans Arabic" (proper shaping);
+# fc-cache builds the fontconfig index so libass resolves families at render.
+RUN apk add --no-cache openssl ffmpeg fontconfig \
+      font-noto font-noto-arabic font-noto-extra ttf-dejavu \
+    && fc-cache -f
 WORKDIR /app
 
 FROM base AS deps

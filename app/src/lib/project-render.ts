@@ -44,28 +44,78 @@ function run(args: string[], timeoutMs = SEGMENT_TIMEOUT_MS): Promise<void> {
   });
 }
 
-function kenburns(kind: string, w: number, h: number, seconds: number): string {
-  const frames = Math.max(1, Math.round(seconds * FPS));
-  const z = 0.14;
+const PAD_COLOR = "0x0f172a";
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+// Builds the video filter graph ([0:v] → [vv]) for one scene's IMAGE visual,
+// honoring the framing mode so a source of any aspect looks good at WxH:
+//  - cover:   fill and crop around the focal point, with Ken Burns motion
+//  - blur:    fit the whole image over a blurred, darkened fill of itself
+//             (best for portrait output from landscape sources — no crop)
+//  - contain: letterbox the whole image on a solid pad
+function buildImageGraph(scene: Scene, w: number, h: number, frames: number, fadeF: string): string {
+  const fx = clamp01(scene.focusX ?? 0.5);
+  const fy = clamp01(scene.focusY ?? 0.5);
+  const sz = Math.max(1, scene.zoom || 1);
+
+  if (scene.fit === "contain") {
+    return `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${PAD_COLOR},fps=${FPS},setsar=1${fadeF}[vv]`;
+  }
+  if (scene.fit === "blur") {
+    return (
+      `[0:v]split=2[bg][fg];` +
+      `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:1,eq=brightness=-0.08[bgb];` +
+      `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs];` +
+      `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1${fadeF}[vv]`
+    );
+  }
+
+  // cover + focal crop (at K× headroom so Ken Burns can pan/zoom without edges)
+  const K = 1.25;
+  const cw = Math.round(w * K);
+  const ch = Math.round(h * K);
+  const cover = `scale=${cw}:${ch}:force_original_aspect_ratio=increase,crop=${cw}:${ch}:x='(iw-ow)*${fx.toFixed(3)}':y='(ih-oh)*${fy.toFixed(3)}'`;
   const centered = `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`;
-  let zp: string;
-  switch (kind) {
+  const amt = 0.14;
+  let z: string;
+  let xy = centered;
+  switch (scene.kenburns) {
     case "out":
-      zp = `zoompan=z='${1 + z}-${z}*on/${frames}':${centered}`;
+      z = `${(sz + amt).toFixed(3)}-${amt}*on/${frames}`;
       break;
     case "left":
-      zp = `zoompan=z='1.1':x='(iw-iw/zoom)*(1-on/${frames})':y='ih/2-(ih/zoom/2)'`;
+      z = `${Math.max(sz, 1.08).toFixed(3)}`;
+      xy = `x='(iw-iw/zoom)*(1-on/${frames})':y='ih/2-(ih/zoom/2)'`;
       break;
     case "right":
-      zp = `zoompan=z='1.1':x='(iw-iw/zoom)*on/${frames}':y='ih/2-(ih/zoom/2)'`;
+      z = `${Math.max(sz, 1.08).toFixed(3)}`;
+      xy = `x='(iw-iw/zoom)*on/${frames}':y='ih/2-(ih/zoom/2)'`;
       break;
     case "none":
-      zp = `zoompan=z='1':${centered}`;
+      z = sz.toFixed(3);
       break;
-    default:
-      zp = `zoompan=z='1+${z}*on/${frames}':${centered}`;
+    default: // in
+      z = `${sz.toFixed(3)}+${amt}*on/${frames}`;
   }
-  return `scale=${w * 2}:-2,${zp}:d=${frames}:s=${w}x${h}:fps=${FPS},setsar=1`;
+  return `[0:v]${cover},zoompan=z='${z}':${xy}:d=${frames}:s=${w}x${h}:fps=${FPS},setsar=1${fadeF}[vv]`;
+}
+
+// Same framing modes for a VIDEO visual (no Ken Burns — the clip has motion).
+function buildVideoGraph(scene: Scene, w: number, h: number, fadeF: string): string {
+  const fx = clamp01(scene.focusX ?? 0.5);
+  const fy = clamp01(scene.focusY ?? 0.5);
+  if (scene.fit === "contain") {
+    return `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${PAD_COLOR},fps=${FPS},setsar=1${fadeF}[vv]`;
+  }
+  if (scene.fit === "blur") {
+    return (
+      `[0:v]split=2[bg][fg];` +
+      `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:1,eq=brightness=-0.08[bgb];` +
+      `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs];` +
+      `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1${fadeF}[vv]`
+    );
+  }
+  return `[0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:x='(iw-ow)*${fx.toFixed(3)}':y='(ih-oh)*${fy.toFixed(3)}',fps=${FPS},setsar=1${fadeF}[vv]`;
 }
 
 async function renderSceneSegment(opts: {
@@ -84,17 +134,18 @@ async function renderSceneSegment(opts: {
     ? `,fade=t=in:st=0:d=0.25,fade=t=out:st=${(duration - 0.25).toFixed(2)}:d=0.25`
     : "";
 
+  const frames = Math.max(1, Math.round(duration * FPS));
   const args: string[] = ["-y", "-hide_banner", "-loglevel", "error"];
-  let videoFilter: string;
+  let videoGraph: string;
   if (!opts.imagePath) {
-    args.push("-f", "lavfi", "-i", `color=c=0x0f172a:s=${width}x${height}:d=${duration}`);
-    videoFilter = `fps=${FPS},setsar=1${fadeF}`;
+    args.push("-f", "lavfi", "-i", `color=c=${PAD_COLOR}:s=${width}x${height}:d=${duration}`);
+    videoGraph = `[0:v]fps=${FPS},setsar=1${fadeF}[vv]`;
   } else if (opts.isVideoVisual) {
     args.push("-stream_loop", "-1", "-i", opts.imagePath);
-    videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${FPS},setsar=1${fadeF}`;
+    videoGraph = buildVideoGraph(scene, width, height, fadeF);
   } else {
     args.push("-i", opts.imagePath);
-    videoFilter = `${kenburns(scene.kenburns, width, height, duration)}${fadeF}`;
+    videoGraph = buildImageGraph(scene, width, height, frames, fadeF);
   }
   if (opts.ttsPath) {
     args.push("-i", opts.ttsPath);
@@ -103,8 +154,8 @@ async function renderSceneSegment(opts: {
   }
   args.push(
     "-filter_complex",
-    `[0:v]${videoFilter}[v];[1:a]apad,aresample=44100[a]`,
-    "-map", "[v]", "-map", "[a]",
+    `${videoGraph};[1:a]apad,aresample=44100[a]`,
+    "-map", "[vv]", "-map", "[a]",
     "-t", duration.toFixed(2),
     "-r", String(FPS),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",

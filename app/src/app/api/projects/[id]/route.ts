@@ -36,6 +36,10 @@ const sceneSchema = z.object({
   transition: z.string().optional(),
   voiceId: z.string().optional(),
   durationSec: z.number().min(1).max(60).optional(),
+  fit: z.enum(["cover", "blur", "contain"]).optional(),
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+  zoom: z.number().min(1).max(3).optional(),
 });
 
 const patchSchema = z.object({
