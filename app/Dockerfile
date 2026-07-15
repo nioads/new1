@@ -1,16 +1,17 @@
-FROM node:22-alpine AS base
-# ffmpeg (renders) + fonts with full Arabic coverage for burned-in captions
-# via libass. font-noto-arabic provides "Noto Sans Arabic" (proper shaping);
-# fc-cache builds the fontconfig index so libass resolves families at render.
-# chromium: used by Remotion for the premium caption renderer. Remotion's own
-# chrome-headless-shell is glibc-only and won't run on Alpine/musl, so we point
-# Remotion at the system chromium via REMOTION_BROWSER_EXECUTABLE.
-RUN apk add --no-cache openssl ffmpeg fontconfig \
-      font-noto font-noto-arabic font-noto-extra ttf-dejavu \
-      chromium nss freetype harfbuzz ca-certificates \
-    && fc-cache -f
-ENV REMOTION_BROWSER_EXECUTABLE=/usr/bin/chromium-browser \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# Debian slim (glibc) rather than Alpine (musl): Remotion's headless Chromium
+# is built for glibc and fails to launch on Alpine, so the premium caption
+# renderer only works reliably here. ffmpeg (with libass+fribidi for RTL) +
+# Noto fonts cover the libass fallback and Arabic shaping.
+FROM node:22-bookworm-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg fontconfig ca-certificates openssl \
+      fonts-noto-core fonts-noto-cjk fonts-dejavu-core \
+      # Chromium runtime libraries required by Remotion's headless shell
+      libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+      libgbm1 libasound2 libpango-1.0-0 libcairo2 libxkbcommon0 libxcomposite1 \
+      libxdamage1 libxfixes3 libxrandr2 libxrender1 libxext6 libx11-6 libglib2.0-0 \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 FROM base AS deps
@@ -26,12 +27,13 @@ RUN npx prisma generate && npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 COPY --from=build /app ./
-# Install the bundled Noto Naskh Arabic into the system so the libass caption
-# fallback resolves the exact family name the ASS references (independent of
-# whatever the distro's font-noto-arabic package happens to provide).
+# Install the bundled Noto Naskh Arabic for the libass caption fallback, and
+# pre-download Remotion's Chromium so the premium renderer needs no network at
+# render time (falls back to a runtime download if this build step has no net).
 RUN mkdir -p /usr/share/fonts/truetype/app \
     && cp /app/remotion/public/fonts/NotoNaskhArabic-*.ttf /usr/share/fonts/truetype/app/ \
-    && fc-cache -f
+    && fc-cache -f \
+    && (npx remotion browser ensure || echo "remotion browser will be fetched at runtime")
 EXPOSE 3000
 # web:    npm run start
 # worker: npm run worker

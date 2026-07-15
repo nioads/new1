@@ -7,13 +7,14 @@ import os from "os";
 import { existsSync } from "fs";
 import { flattenGroups, type CaptionDocument } from "./captions";
 
-// Candidate system-chromium locations (Alpine names it differently across
-// versions). Remotion's bundled headless shell is glibc-only, so on musl we
-// must use a system browser.
+// On our Debian image Remotion manages its own (glibc) headless Chromium, so
+// no system browser is needed. These candidates only let an operator point at
+// a preinstalled browser via REMOTION_BROWSER_EXECUTABLE or a distro package;
+// when none exist we fall back to Remotion's managed browser.
 const BROWSER_CANDIDATES = [
   process.env.REMOTION_BROWSER_EXECUTABLE,
-  "/usr/bin/chromium-browser",
   "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
   "/usr/bin/google-chrome",
 ].filter(Boolean) as string[];
 
