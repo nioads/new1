@@ -22,6 +22,7 @@ export type BrandDto = {
   s3PublicBaseUrl: string;
   introUrl: string;
   outroUrl: string;
+  captionStyleId: string | null;
   _count?: { feeds: number; templates: number };
 };
 

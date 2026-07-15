@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { BrandDto, NewsItemDto } from "@/lib/types";
 import type { MusicTrackDto } from "@/components/music";
 import { SceneCaptionPanel } from "@/components/scene-caption-panel";
+import { CaptionStyleQuick, type CaptionStyleItem } from "@/components/caption-style-quick";
 
 const VIDEO_URL = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
 
@@ -116,7 +117,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const [music, setMusic] = useState<MusicTrackDto[]>([]);
   const [brands, setBrands] = useState<BrandDto[]>([]);
   const [voices, setVoices] = useState<VoiceDto[]>([]);
-  const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
+  const [captionStyles, setCaptionStyles] = useState<CaptionStyleItem[]>([]);
   const [sceneCount, setSceneCount] = useState(6);
   const [generating, setGenerating] = useState(false);
   const [metaBusy, setMetaBusy] = useState(false);
@@ -378,6 +379,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               <option value="remotion">Remotion (animated)</option>
               <option value="libass">libass (fast)</option>
             </select>
+            <CaptionStyleQuick
+              styles={captionStyles}
+              styleId={project.captionStyleId}
+              onSelect={(id) => setProject({ ...project, captionStyleId: id })}
+              onStylesChange={setCaptionStyles}
+            />
           </>
         )}
         <label

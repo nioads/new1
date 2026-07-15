@@ -74,10 +74,12 @@ export function Brands() {
   const [selected, setSelected] = useState<BrandDto | null>(null);
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [captionStyles, setCaptionStyles] = useState<Array<{ id: string; name: string }>>([]);
   const logoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/brands").then((r) => r.json()).then(setBrands);
+    fetch("/api/captions").then((r) => r.json()).then((s) => setCaptionStyles(Array.isArray(s) ? s : []));
   }, []);
 
   async function addBrand(e: React.FormEvent) {
@@ -125,6 +127,7 @@ export function Brands() {
         s3PublicBaseUrl: selected.s3PublicBaseUrl,
         introUrl: selected.introUrl,
         outroUrl: selected.outroUrl,
+        captionStyleId: selected.captionStyleId,
       }),
     });
     if (res.ok) setSavedAt(Date.now());
@@ -314,6 +317,24 @@ export function Brands() {
                   />
                 ))}
               </div>
+              <label className="block text-xs text-slate-400">
+                Default caption style (new videos for this brand inherit it)
+                <select
+                  value={selected.captionStyleId ?? ""}
+                  onChange={(e) => patchBrand({ captionStyleId: e.target.value || null })}
+                  className="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-xs"
+                >
+                  <option value="">Default (Hormozi)</option>
+                  {captionStyles.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  Edit sizes, colors &amp; highlight in Settings → Caption styles, or per project in the editor.
+                </span>
+              </label>
             </div>
 
             <div className="pt-2 border-t border-slate-800 space-y-3">

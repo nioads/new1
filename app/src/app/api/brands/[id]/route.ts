@@ -19,6 +19,7 @@ const patchSchema = z.object({
   s3PublicBaseUrl: z.string().optional(),
   introUrl: z.string().optional(),
   outroUrl: z.string().optional(),
+  captionStyleId: z.string().nullable().optional(),
 });
 
 export async function PATCH(

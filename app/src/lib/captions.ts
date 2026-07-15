@@ -490,6 +490,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const active = assColor(spec.activeColor);
   const base = assColor(spec.baseColor);
+  // Unicode bidi controls: RLE…PDF forces RTL word order for Arabic groups
+  // (libass otherwise lays the words out left-to-right in logical order).
+  const RLE = "‫";
+  const PDF = "‬";
   const lines: string[] = [];
   for (const grp of flattenGroups(doc)) {
     const words = grp.words.map((w) => ({ ...w, text: escapeAss(w.text) })).filter((w) => w.text.trim());
@@ -500,7 +504,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const text = words
         .map((w, j) => (j === i && active !== base ? `{\\c${active}}${w.text}{\\c${base}}` : w.text))
         .join(" ");
-      lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${text}`);
+      const ordered = grp.direction === "rtl" ? `${RLE}${text}${PDF}` : text;
+      lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${ordered}`);
     }
   }
   return header + lines.join("\n") + "\n";

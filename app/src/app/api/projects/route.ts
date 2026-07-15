@@ -35,6 +35,9 @@ export async function POST(req: NextRequest) {
     });
     if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 });
     const [width, height] = body.aspect === "9:16" ? [1080, 1920] : [1920, 1080];
+    // default to the feed's brand so intro/outro/logo apply automatically
+    const brandId = body.brandId ?? item.feed.brandId ?? null;
+    const brand = brandId ? await prisma.brand.findUnique({ where: { id: brandId } }) : null;
     const project = await prisma.videoProject.create({
       data: {
         itemId: item.id,
@@ -42,8 +45,9 @@ export async function POST(req: NextRequest) {
         aspect: body.aspect,
         width,
         height,
-        // default to the feed's brand so intro/outro/logo apply automatically
-        brandId: body.brandId ?? item.feed.brandId ?? null,
+        brandId,
+        // inherit the brand's default caption style when set
+        captionStyleId: brand?.captionStyleId ?? null,
         scriptPrompt: defaultScriptPrompt(body.aspect),
       },
     });

@@ -46,6 +46,8 @@ model Brand {
   // video branding: intro/outro clips prepended/appended to article→video renders
   introUrl       String      @default("")
   outroUrl       String      @default("")
+  // default caption style for this brand's videos (projects inherit it)
+  captionStyleId String?
   createdAt      DateTime    @default(now())
 
   feeds     Feed[]
