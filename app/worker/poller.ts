@@ -9,7 +9,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { fetchFeed } from "../src/lib/rss";
 import { broadcastPush } from "../src/lib/push";
 import { processNextRender } from "../src/lib/render";
-import { processNextProject } from "../src/lib/project-render";
+import { processNextProject, processNextScenePreview } from "../src/lib/project-render";
 import { extractArticle } from "../src/lib/article";
 
 const prisma = new PrismaClient({
@@ -297,3 +297,19 @@ setInterval(async () => {
     projecting = false;
   }
 }, 4000);
+
+// Per-scene preview render queue (independent scene proxies for review).
+let previewing = false;
+setInterval(async () => {
+  if (previewing) return;
+  previewing = true;
+  try {
+    while (await processNextScenePreview(prisma)) {
+      /* keep draining */
+    }
+  } catch (err) {
+    console.error("[scene-preview] queue error:", err);
+  } finally {
+    previewing = false;
+  }
+}, 3000);

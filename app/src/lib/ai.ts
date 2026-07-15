@@ -168,6 +168,37 @@ ${content.body.slice(0, 12000)}`;
   };
 }
 
+// ---------- caption grouping ----------
+// Uses the LLM to split a transcript into short, meaning-based caption groups.
+// Returns the number of words per group (so the caller maps groups back onto
+// the timed word list). Returns null on any failure → caller uses the
+// heuristic grouper instead.
+export async function aiGroupCaptions(
+  settings: Settings,
+  words: string[],
+  opts?: { minWords?: number; maxWords?: number },
+): Promise<number[] | null> {
+  if (llmMocked(settings) || words.length === 0) return null;
+  const min = opts?.minWords ?? 2;
+  const max = opts?.maxWords ?? 5;
+  const numbered = words.map((w, i) => `${i + 1}:${w}`).join(" ");
+  const prompt = `You segment a spoken transcript into short on-screen caption groups.
+Rules: group by meaning and natural phrasing; ${min}-${max} words per group; keep names, numbers and units together; a strong final word may be its own group. Every word must be used exactly once, in order.
+The transcript words are numbered:
+${numbered}
+
+Respond ONLY with JSON: {"groups":[<wordCount>, <wordCount>, ...]} where each number is how many consecutive words form that group, in order, summing to ${words.length}.`;
+  try {
+    const raw = await generateText(settings, prompt);
+    const parsed = extractJson(raw) as { groups?: unknown };
+    const groups = Array.isArray(parsed.groups) ? parsed.groups.map((n) => Number(n)) : [];
+    if (groups.some((n) => !Number.isFinite(n))) return null;
+    return groups;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- TTS ----------
 
 function run(cmd: string, args: string[]): Promise<void> {

@@ -235,6 +235,16 @@ enum ProjectStatus {
   ERROR
 }
 
+enum SceneStatus {
+  DRAFT // not yet previewed
+  QUEUED // preview render requested
+  PROCESSING // preview rendering now
+  PREVIEW_READY // preview available for review
+  REQUIRES_CHANGES // user rejected — needs edits
+  APPROVED // approved for final assembly
+  RENDER_FAILED // preview render failed
+}
+
 // Article → Video project: script broken into scenes, each with its own
 // visual, narration, motion and transition; assembled by the worker.
 model VideoProject {
@@ -264,6 +274,8 @@ model VideoProject {
   captionsEnabled Boolean    @default(true)
   captionStyleId  String?
   captionRenderer String     @default("") // "" = use global setting; "remotion" | "libass"
+  // when true, only APPROVED scenes are joined into the final video
+  requireApproval Boolean    @default(false)
   captionSrtUrl String        @default("")
   captionVttUrl String        @default("")
   outputUrl    String        @default("")
@@ -303,8 +315,13 @@ model Scene {
   // edited caption groups (scene-relative ms) — source of truth for captions
   // when present; otherwise groups are derived from `words` at render time.
   captionGroups Json?
+  // per-scene preview + approval workflow
+  status       SceneStatus @default(DRAFT)
+  previewUrl   String      @default("")
+  previewError String      @default("")
 
   @@index([projectId, order])
+  @@index([status])
 }
 
 model PushSubscription {

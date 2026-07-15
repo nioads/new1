@@ -308,6 +308,57 @@ export function groupWords(words: CaptionWord[], spec: CaptionStyleSpec): Captio
   });
 }
 
+// Builds caption groups from an explicit per-group word-count plan (e.g. from
+// an AI semantic grouper). Counts are clamped to the word list; any leftover
+// words form a final group. Falls back to heuristic grouping if counts are
+// unusable (empty or summing to the wrong total).
+export function groupWordsByCounts(
+  words: CaptionWord[],
+  counts: number[],
+  spec: CaptionStyleSpec,
+): CaptionGroup[] {
+  const clean = words.map((w) => ({ ...w, w: (spec.uppercase ? w.w.toUpperCase() : w.w).trim() })).filter((w) => w.w);
+  const valid = counts.filter((n) => Number.isInteger(n) && n > 0);
+  const sum = valid.reduce((a, n) => a + n, 0);
+  if (valid.length === 0 || sum < clean.length * 0.6) return groupWords(words, spec);
+
+  const chunks: CaptionWord[][] = [];
+  let idx = 0;
+  for (const n of valid) {
+    if (idx >= clean.length) break;
+    chunks.push(clean.slice(idx, idx + n));
+    idx += n;
+  }
+  if (idx < clean.length) {
+    // leftover words: append to last group if small, else own group
+    const rest = clean.slice(idx);
+    const last = chunks[chunks.length - 1];
+    if (last && last.length + rest.length <= (spec.maxWords ?? 5)) last.push(...rest);
+    else chunks.push(rest);
+  }
+
+  return chunks
+    .filter((c) => c.length)
+    .map((chunk) => {
+      const wordUnits: WordUnit[] = chunk.map((w) => ({
+        id: nextId("w"),
+        text: w.w,
+        startMs: ms(w.s),
+        endMs: ms(w.e),
+        direction: wordDirection(w.w),
+      }));
+      const text = wordUnits.map((w) => w.text).join(" ");
+      return {
+        groupId: nextId("g"),
+        text,
+        startMs: wordUnits[0].startMs,
+        endMs: Math.max(wordUnits[wordUnits.length - 1].endMs, wordUnits[0].startMs + 200),
+        direction: baseDirection(text),
+        words: wordUnits,
+      };
+    });
+}
+
 // Builds the self-contained per-scene caption JSON (scene-relative ms).
 export function buildSceneCaption(
   sceneId: string,

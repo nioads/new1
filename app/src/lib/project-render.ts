@@ -205,6 +205,151 @@ async function normalizeClip(
   return ffprobeDuration(outPath);
 }
 
+// Resolves the caption style spec for a project.
+async function resolveCaptionStyle(
+  prisma: PrismaClient,
+  captionStyleId: string | null,
+): Promise<CaptionStyleSpec> {
+  if (captionStyleId) {
+    const style = await prisma.captionStyle.findUnique({ where: { id: captionStyleId } });
+    if (style) return style.style as unknown as CaptionStyleSpec;
+  }
+  return BUILTIN_CAPTION_STYLES[0].style;
+}
+
+// Builds caption render inputs from a caption document: a Remotion alpha
+// overlay (premium) or an ASS file (libass fallback). Auto-falls back to libass
+// when Remotion fails. Returns paths (either overlayPath or assPath is set).
+async function resolveCaptionRender(
+  doc: CaptionDocument,
+  renderer: string,
+  workDir: string,
+): Promise<{ overlayPath: string | null; assPath: string | null }> {
+  let overlayPath: string | null = null;
+  let assPath: string | null = null;
+  if ((renderer || "remotion").toLowerCase() === "remotion") {
+    overlayPath = path.join(workDir, "captions.webm");
+    const ok = await renderCaptionOverlay(doc, overlayPath);
+    if (!ok) overlayPath = null;
+  }
+  if (!overlayPath) {
+    assPath = path.join(workDir, "captions.ass");
+    await writeFile(assPath, buildAss(doc));
+  }
+  return { overlayPath, assPath };
+}
+
+// Second pass over a base MP4: logo watermark + burned/overlaid captions
+// (video) and a ducked music bed (audio). Input 0 is always the base; music/
+// logo/caption-overlay take the next indices only when present. When there is
+// nothing to add, the base is renamed to the output (stream copy).
+async function compositeExtras(opts: {
+  baseMp4: string;
+  outPath: string;
+  width: number;
+  height: number;
+  totalSec: number;
+  logoPath: string | null;
+  assPath: string | null;
+  overlayPath: string | null;
+  musicPath: string | null;
+}): Promise<void> {
+  const { baseMp4, outPath, width, height, totalSec } = opts;
+  const needVideoFx = !!opts.logoPath || !!opts.assPath || !!opts.overlayPath;
+  const needAudioFx = !!opts.musicPath;
+  if (!needVideoFx && !needAudioFx) {
+    await rm(outPath, { force: true }).catch(() => {});
+    const { rename } = await import("fs/promises");
+    await rename(baseMp4, outPath);
+    return;
+  }
+  const args: string[] = ["-y", "-hide_banner", "-loglevel", "error", "-i", baseMp4];
+  let idx = 1;
+  let musicIdx = -1;
+  let logoIdx = -1;
+  let capIdx = -1;
+  if (opts.musicPath) {
+    args.push("-stream_loop", "-1", "-i", opts.musicPath);
+    musicIdx = idx++;
+  }
+  if (opts.logoPath) {
+    args.push("-i", opts.logoPath);
+    logoIdx = idx++;
+  }
+  if (opts.overlayPath) {
+    args.push("-i", opts.overlayPath);
+    capIdx = idx++;
+  }
+  const fc: string[] = [];
+  let vOut = "0:v";
+  if (needVideoFx) {
+    let v = "[0:v]";
+    if (logoIdx >= 0) {
+      const logoW = Math.round(width * 0.12);
+      const m = Math.round(width * 0.03);
+      fc.push(`[${logoIdx}:v]scale=${logoW}:-1[lg]`);
+      fc.push(`${v}[lg]overlay=W-w-${m}:${m}[lv]`);
+      v = "[lv]";
+    }
+    if (capIdx >= 0) {
+      fc.push(`[${capIdx}:v]scale=${width}:${height},setsar=1[cap]`);
+      fc.push(`${v}[cap]overlay=0:0:eof_action=pass[cv]`);
+      v = "[cv]";
+    }
+    if (opts.assPath) {
+      const escaped = opts.assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+      fc.push(`${v}subtitles='${escaped}'[sv]`);
+      v = "[sv]";
+    }
+    vOut = v.replace(/[[\]]/g, "");
+  }
+  let aOut = "0:a";
+  if (needAudioFx) {
+    const fadeStart = Math.max(0, totalSec - 2).toFixed(2);
+    fc.push(`[${musicIdx}:a]volume=0.22[mq]`);
+    fc.push(
+      `[0:a][mq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=2[amx]`,
+    );
+    aOut = "amx";
+  }
+  args.push("-filter_complex", fc.join(";"));
+  args.push("-map", needVideoFx ? `[${vOut}]` : "0:v");
+  args.push("-map", needAudioFx ? `[${aOut}]` : "0:a");
+  args.push("-t", totalSec.toFixed(2));
+  args.push(...(needVideoFx ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"] : ["-c:v", "copy"]));
+  args.push(...(needAudioFx ? ["-c:a", "aac", "-ar", "44100", "-ac", "2"] : ["-c:a", "copy"]));
+  args.push("-movflags", "+faststart", outPath);
+  await run(args, 20 * 60 * 1000);
+}
+
+// Resolves a scene's visual to a local file (or generates a placeholder), and
+// whether it is a video. Shared by the final render and the scene preview.
+async function resolveSceneVisual(
+  settings: Awaited<ReturnType<typeof getSettings>>,
+  scene: Scene,
+  workDir: string,
+  tag: string,
+  width: number,
+  height: number,
+  idx: number,
+): Promise<{ imagePath: string; isVideoVisual: boolean }> {
+  const resolved = scene.imageUrl ? await resolveOptionalLocalFile(scene.imageUrl, tag) : null;
+  if (resolved) {
+    const isVideoVisual =
+      !IMAGE_EXT.test(scene.imageUrl) && /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i.test(scene.imageUrl);
+    return { imagePath: resolved.path, isVideoVisual };
+  }
+  const buffer = await generateImage(
+    settings,
+    scene.imagePrompt || scene.imageQuery || scene.text.slice(0, 120),
+    width,
+    height,
+  );
+  const imagePath = path.join(workDir, `gen-${idx}.png`);
+  await writeFile(imagePath, buffer);
+  return { imagePath, isVideoVisual: false };
+}
+
 export async function processNextProject(prisma: PrismaClient): Promise<boolean> {
   const job = await prisma.videoProject.findFirst({
     where: { status: "QUEUED" },
@@ -222,11 +367,21 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
 
   try {
     const settings = await getSettings(prisma);
-    const scenes = await prisma.scene.findMany({
+    const allScenes = await prisma.scene.findMany({
       where: { projectId: job.id },
       orderBy: { order: "asc" },
     });
-    if (scenes.length === 0) throw new Error("Project has no scenes");
+    // Approval gate: when enabled, only APPROVED scenes are joined.
+    const scenes = job.requireApproval
+      ? allScenes.filter((s) => s.status === "APPROVED")
+      : allScenes;
+    if (scenes.length === 0) {
+      throw new Error(
+        job.requireApproval
+          ? "No approved scenes to assemble — approve scenes first or turn off approval gating"
+          : "Project has no scenes",
+      );
+    }
     await mkdir(workDir, { recursive: true });
 
     const brand = job.brandId
@@ -352,97 +507,24 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     let overlayPath: string | null = null;
     let captionDoc: CaptionDocument | null = null;
     if (job.captionsEnabled && sceneCaptions.length > 0) {
-      let spec: CaptionStyleSpec = BUILTIN_CAPTION_STYLES[0].style;
-      if (job.captionStyleId) {
-        const style = await prisma.captionStyle.findUnique({ where: { id: job.captionStyleId } });
-        if (style) spec = style.style as unknown as CaptionStyleSpec;
-      }
+      const spec = await resolveCaptionStyle(prisma, job.captionStyleId);
       captionDoc = buildCaptionDocument(sceneCaptions, spec, job.width, job.height, FPS);
-
-      const renderer = (job.captionRenderer || settings.CAPTION_RENDERER || "remotion").toLowerCase();
-      if (renderer === "remotion") {
-        // Premium path: render an alpha overlay with Remotion. On any failure
-        // (missing browser, bundle error) fall through to libass automatically.
-        overlayPath = path.join(workDir, "captions.webm");
-        const ok = await renderCaptionOverlay(captionDoc, overlayPath);
-        if (!ok) overlayPath = null;
-      }
-      if (!overlayPath) {
-        assPath = path.join(workDir, "captions.ass");
-        await writeFile(assPath, buildAss(captionDoc));
-      }
+      const renderer = job.captionRenderer || settings.CAPTION_RENDERER || "remotion";
+      ({ overlayPath, assPath } = await resolveCaptionRender(captionDoc, renderer, workDir));
     }
 
-    // 2b. Second pass over the concatenated video: logo watermark + burned
-    //     captions (video) and music bed (audio). Input 0 is always the concat;
-    //     music/logo get the next indices only when present.
-    const needVideoFx = !!logoPath || !!assPath || !!overlayPath;
-    const needAudioFx = !!musicPath;
-    if (!needVideoFx && !needAudioFx) {
-      await rm(outPath, { force: true }).catch(() => {});
-      const { rename } = await import("fs/promises");
-      await rename(concatMp4, outPath);
-    } else {
-      const args: string[] = ["-y", "-hide_banner", "-loglevel", "error", "-i", concatMp4];
-      let idx = 1;
-      let musicIdx = -1;
-      let logoIdx = -1;
-      let capIdx = -1;
-      if (musicPath) {
-        args.push("-stream_loop", "-1", "-i", musicPath);
-        musicIdx = idx++;
-      }
-      if (logoPath) {
-        args.push("-i", logoPath);
-        logoIdx = idx++;
-      }
-      if (overlayPath) {
-        args.push("-i", overlayPath);
-        capIdx = idx++;
-      }
-      const fc: string[] = [];
-      let vOut = "0:v";
-      if (needVideoFx) {
-        let v = "[0:v]";
-        if (logoIdx >= 0) {
-          const logoW = Math.round(job.width * 0.12);
-          const m = Math.round(job.width * 0.03);
-          fc.push(`[${logoIdx}:v]scale=${logoW}:-1[lg]`);
-          fc.push(`${v}[lg]overlay=W-w-${m}:${m}[lv]`);
-          v = "[lv]";
-        }
-        if (capIdx >= 0) {
-          // Composite the Remotion alpha caption overlay (may be shorter than
-          // the video — hold nothing after it ends).
-          fc.push(`[${capIdx}:v]scale=${job.width}:${job.height},setsar=1[cap]`);
-          fc.push(`${v}[cap]overlay=0:0:eof_action=pass[cv]`);
-          v = "[cv]";
-        }
-        if (assPath) {
-          const escaped = assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
-          fc.push(`${v}subtitles='${escaped}'[sv]`);
-          v = "[sv]";
-        }
-        vOut = v.replace(/[[\]]/g, "");
-      }
-      let aOut = "0:a";
-      if (needAudioFx) {
-        const fadeStart = Math.max(0, total - 2).toFixed(2);
-        fc.push(`[${musicIdx}:a]volume=0.22[mq]`);
-        fc.push(
-          `[0:a][mq]amix=inputs=2:duration=first:dropout_transition=0,afade=t=out:st=${fadeStart}:d=2[amx]`,
-        );
-        aOut = "amx";
-      }
-      args.push("-filter_complex", fc.join(";"));
-      args.push("-map", needVideoFx ? `[${vOut}]` : "0:v");
-      args.push("-map", needAudioFx ? `[${aOut}]` : "0:a");
-      args.push("-t", total.toFixed(2));
-      args.push(...(needVideoFx ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"] : ["-c:v", "copy"]));
-      args.push(...(needAudioFx ? ["-c:a", "aac", "-ar", "44100", "-ac", "2"] : ["-c:a", "copy"]));
-      args.push("-movflags", "+faststart", outPath);
-      await run(args, 20 * 60 * 1000);
-    }
+    // 2b. Second pass: logo watermark + captions + ducked music bed.
+    await compositeExtras({
+      baseMp4: concatMp4,
+      outPath,
+      width: job.width,
+      height: job.height,
+      totalSec: total,
+      logoPath,
+      assPath,
+      overlayPath,
+      musicPath,
+    });
 
     const buffer = await readFile(outPath);
     const stored = await storeFile(brand, buffer, `project-${job.id}.mp4`, "video/mp4");
@@ -508,6 +590,127 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     });
   } finally {
     for (const f of cleanup) await rm(f, { recursive: true, force: true }).catch(() => {});
+  }
+  return true;
+}
+
+// Preview proxy dimensions: cap the long side for faster interaction while
+// keeping the exact aspect ratio. Caption layout is percent/height-relative so
+// it stays proportionally identical to the final render.
+function previewDims(w: number, h: number): { w: number; h: number } {
+  const cap = 720;
+  const factor = Math.min(1, cap / Math.max(w, h));
+  const even = (n: number) => Math.max(2, Math.round((n * factor) / 2) * 2);
+  return { w: even(w), h: even(h) };
+}
+
+// Renders ONE scene independently (media + framing + Ken Burns + voice-over +
+// captions + logo + music) using the SAME caption engine as the final export,
+// so the editor preview matches the final video. Claims a QUEUED scene and
+// marks it PREVIEW_READY / RENDER_FAILED.
+export async function processNextScenePreview(prisma: PrismaClient): Promise<boolean> {
+  const pending = await prisma.scene.findFirst({
+    where: { status: "QUEUED" },
+    orderBy: { id: "asc" },
+  });
+  if (!pending) return false;
+  const claimed = await prisma.scene.updateMany({
+    where: { id: pending.id, status: "QUEUED" },
+    data: { status: "PROCESSING" },
+  });
+  if (claimed.count === 0) return false;
+
+  const scene = await prisma.scene.findUnique({
+    where: { id: pending.id },
+    include: { project: true },
+  });
+  if (!scene) return true;
+  const project = scene.project;
+  const workDir = path.join(mediaDir(), "scene-tmp", scene.id);
+  const tag = `scene-tmp/${scene.id}`;
+  const { w, h } = previewDims(project.width, project.height);
+
+  try {
+    const settings = await getSettings(prisma);
+    await mkdir(workDir, { recursive: true });
+    const brand = project.brandId
+      ? await prisma.brand.findUnique({ where: { id: project.brandId } })
+      : null;
+
+    const { imagePath, isVideoVisual } = await resolveSceneVisual(settings, scene, workDir, tag, w, h, 0);
+    const ttsPath = scene.ttsUrl
+      ? (await resolveOptionalLocalFile(scene.ttsUrl, tag))?.path ?? null
+      : null;
+
+    const segPath = path.join(workDir, "seg.mp4");
+    const segDuration = await renderSceneSegment({
+      scene,
+      imagePath,
+      ttsPath,
+      width: w,
+      height: h,
+      outPath: segPath,
+      isVideoVisual,
+    });
+
+    // captions for this single scene (offset 0), same engine as final
+    let overlayPath: string | null = null;
+    let assPath: string | null = null;
+    if (project.captionsEnabled && scene.text.trim()) {
+      const words =
+        (scene.words as CaptionWord[] | null) ??
+        estimateWords(scene.text, Math.max(1, segDuration - 0.6));
+      const groups = (scene.captionGroups as CaptionGroup[] | null) ?? undefined;
+      const spec = await resolveCaptionStyle(prisma, project.captionStyleId);
+      const doc = buildCaptionDocument(
+        [{ sceneId: scene.id, offsetSec: 0, words, groups: groups && groups.length ? groups : undefined }],
+        spec,
+        w,
+        h,
+        FPS,
+      );
+      const renderer = project.captionRenderer || settings.CAPTION_RENDERER || "remotion";
+      ({ overlayPath, assPath } = await resolveCaptionRender(doc, renderer, workDir));
+    }
+
+    const logoPath = brand?.logoUrl
+      ? (await resolveOptionalLocalFile(brand.logoUrl, tag))?.path ?? null
+      : null;
+    let musicPath: string | null = null;
+    if (project.musicTrackId) {
+      const track = await prisma.musicTrack.findUnique({ where: { id: project.musicTrackId } });
+      if (track) musicPath = (await resolveOptionalLocalFile(track.url, tag))?.path ?? null;
+    }
+
+    const outPath = path.join(workDir, "preview.mp4");
+    await compositeExtras({
+      baseMp4: segPath,
+      outPath,
+      width: w,
+      height: h,
+      totalSec: segDuration,
+      logoPath,
+      assPath,
+      overlayPath,
+      musicPath,
+    });
+
+    const buffer = await readFile(outPath);
+    const stored = await storeFile(brand, buffer, `scene-${scene.id}.mp4`, "video/mp4");
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { status: "PREVIEW_READY", previewUrl: stored.url, previewError: "" },
+    });
+    console.log(`[scene] ${scene.id} preview ready → ${stored.url} (${segDuration.toFixed(1)}s)`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[scene] ${scene.id} preview failed: ${message}`);
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { status: "RENDER_FAILED", previewError: message.slice(0, 1000) },
+    });
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
   return true;
 }

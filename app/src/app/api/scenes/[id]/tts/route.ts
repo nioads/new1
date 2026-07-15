@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api";
 import { getSettings } from "@/lib/settings";
 import { synthesizeSpeech, transcribeWords } from "@/lib/ai";
+import { generateSceneGroups } from "@/lib/scene-captions";
 import { storeFile } from "@/lib/storage";
 import { readFile, rm } from "fs/promises";
 
@@ -34,15 +35,21 @@ export async function POST(
       : null;
     const stored = await storeFile(brand, buffer, `tts-${id}.mp3`, "audio/mpeg");
 
-    const updated = await prisma.scene.update({
+    await prisma.scene.update({
       where: { id },
       data: {
         ttsUrl: stored.url,
         ttsDuration: speech.duration,
         durationSec: Math.max(1.5, speech.duration + 0.6),
         words: JSON.parse(JSON.stringify(words)),
+        // new narration → captions and any prior preview are stale
+        status: "DRAFT",
+        previewUrl: "",
       },
     });
+    // (re)build caption groups from the fresh word timings
+    await generateSceneGroups(prisma, id).catch(() => {});
+    const updated = await prisma.scene.findUnique({ where: { id } });
     return NextResponse.json(updated);
   } catch (err) {
     return jsonError(err);
