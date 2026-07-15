@@ -208,6 +208,14 @@ export const CaptionOverlay: React.FC<{ doc: CaptionDocument }> = ({ doc }) => {
           paddingRight: Math.round(width * 0.05),
         }}
       >
+        {/*
+          Word layout uses the browser's native Unicode bidi algorithm — the
+          block is dir=rtl for Arabic and each word is an inline-block that the
+          bidi algorithm orders right-to-left (first word rightmost). Flexbox is
+          intentionally NOT used because its item order does not reliably follow
+          `direction` in the render browser. Isolated LTR runs (numbers, Latin)
+          keep their own direction inside the RTL line.
+        */}
         <div
           dir={group.direction}
           style={{
@@ -215,13 +223,8 @@ export const CaptionOverlay: React.FC<{ doc: CaptionDocument }> = ({ doc }) => {
             fontFamily,
             fontSize,
             fontWeight: spec.bold ? 700 : 400,
-            lineHeight: spec.lineHeight ?? 1.25,
+            lineHeight: spec.lineHeight ?? 1.3,
             textAlign: "center",
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: `${Math.round(fontSize * 0.18)}px ${Math.round(fontSize * 0.26)}px`,
             direction: group.direction,
             unicodeBidi: "isolate",
             opacity,
@@ -252,38 +255,36 @@ export const CaptionOverlay: React.FC<{ doc: CaptionDocument }> = ({ doc }) => {
             const cellPad = highlightMode === "pill" || highlightMode === "background"
               ? `${Math.round(fontSize * 0.06)}px ${Math.round(fontSize * 0.16)}px`
               : "0";
+            const gap = Math.round(fontSize * 0.16);
             return (
-              // Fixed-size cell: reserves the word's base footprint so scaling
-              // the inner span never reflows the line or moves siblings.
+              // inline-block word: ordered by the bidi algorithm (RTL for
+              // Arabic). Its own dir keeps letters shaped/joined correctly and
+              // isolates mixed runs. Scaling is a post-layout transform so it
+              // never reflows the line or moves neighbours.
               <span
                 key={w.id}
                 dir={w.direction}
                 style={{
-                  display: "inline-flex",
+                  display: "inline-block",
                   unicodeBidi: "isolate",
-                  position: "relative",
+                  marginInlineStart: gap / 2,
+                  marginInlineEnd: gap / 2,
+                  transform: `scale(${scale})`,
+                  transformOrigin: "center",
+                  transition: reduce ? undefined : `transform ${spec.transitionMs ?? 140}ms ease-out`,
+                  color,
+                  background: bg,
+                  borderRadius: highlightMode === "pill" ? 999 : highlightMode === "background" ? Math.round(fontSize * 0.14) : 0,
+                  padding: cellPad,
+                  borderBottom:
+                    isActive && highlightMode === "underline"
+                      ? `${Math.max(2, Math.round(fontSize * 0.06))}px solid ${spec.activeColor}`
+                      : undefined,
+                  textShadow: bg === "transparent" ? outlineShadow(spec.outlineColor, spec.outlineWidth * (height / 1080)) : "none",
+                  whiteSpace: "nowrap",
                 }}
               >
-                <span
-                  style={{
-                    display: "inline-block",
-                    transform: `scale(${scale})`,
-                    transformOrigin: "center",
-                    transition: reduce ? undefined : `transform ${spec.transitionMs ?? 140}ms ease-out`,
-                    color,
-                    background: bg,
-                    borderRadius: highlightMode === "pill" ? 999 : highlightMode === "background" ? Math.round(fontSize * 0.14) : 0,
-                    padding: cellPad,
-                    borderBottom:
-                      isActive && highlightMode === "underline"
-                        ? `${Math.max(2, Math.round(fontSize * 0.06))}px solid ${spec.activeColor}`
-                        : undefined,
-                    textShadow: bg === "transparent" ? outlineShadow(spec.outlineColor, spec.outlineWidth * (height / 1080)) : "none",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {w.text}
-                </span>
+                {w.text}
               </span>
             );
           })}
