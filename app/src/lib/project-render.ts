@@ -228,7 +228,7 @@ async function resolveCaptionRender(
   let overlayPath: string | null = null;
   let assPath: string | null = null;
   if ((renderer || "remotion").toLowerCase() === "remotion") {
-    overlayPath = path.join(workDir, "captions.webm");
+    overlayPath = path.join(workDir, "captions.mov");
     const ok = await renderCaptionOverlay(doc, overlayPath);
     if (!ok) overlayPath = null;
   }

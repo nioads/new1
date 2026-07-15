@@ -72,18 +72,23 @@ export async function renderCaptionOverlay(
       inputProps,
       browserExecutable,
     });
+    // ProRes 4444 (.mov) — the reliable alpha-preserving codec. VP8/VP9 webm
+    // dropped the alpha channel (encoded yuv420p → opaque), which made the
+    // overlay hide the video underneath. ProRes 4444 keeps a true alpha channel
+    // (yuva444p10le) so the captions composite transparently over the scene.
     await renderMedia({
       composition,
       serveUrl,
-      codec: "vp8", // webm; supports alpha
-      pixelFormat: "yuva420p",
+      codec: "prores",
+      proResProfile: "4444",
+      pixelFormat: "yuva444p10le",
       imageFormat: "png",
       outputLocation: outPath,
       inputProps,
       browserExecutable,
       concurrency: Math.max(1, Math.min(4, (os.cpus?.().length ?? 2) - 1)),
       chromiumOptions: { gl: "swangle" },
-      timeoutInMilliseconds: 60_000,
+      timeoutInMilliseconds: 120_000,
     });
     return true;
   } catch (err) {
