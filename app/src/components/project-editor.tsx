@@ -76,6 +76,7 @@ type VoiceDto = { id: string; name: string; previewUrl: string; labels: string }
 type ProjectDto = {
   id: string;
   title: string;
+  kind?: string; // "article" | "montage"
   aspect: "16:9" | "9:16";
   width: number;
   height: number;
@@ -440,7 +441,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      {/* pre-generation options */}
+      {project.kind === "montage" && (
+        <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 text-xs text-slate-400">
+          Short video · up to 15s · add 1–3 clips below. Upload or generate a photo/video for
+          each clip, set its motion &amp; on-screen text, then render a preview per clip.
+        </div>
+      )}
+
+      {/* pre-generation options (article projects only) */}
+      {project.kind !== "montage" && (<>
       <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-3">
         <p className="text-xs uppercase tracking-wide text-slate-500">1 — Setup</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -561,6 +570,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      </>)}
 
       {/* scenes */}
       {project.scenes.length > 0 && (

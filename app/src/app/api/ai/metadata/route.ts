@@ -36,7 +36,9 @@ export async function POST(req: NextRequest) {
       const project = await prisma.videoProject.findUnique({ where: { id: b.projectId } });
       if (project) {
         lang = project.scriptLang || "";
-        const item = await prisma.newsItem.findUnique({ where: { id: project.itemId } });
+        const item = project.itemId
+          ? await prisma.newsItem.findUnique({ where: { id: project.itemId } })
+          : null;
         if (item) {
           title = title || item.title;
           body = body || item.content || item.summary;

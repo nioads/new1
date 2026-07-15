@@ -23,6 +23,9 @@ export async function POST(
     const body = schema.parse(await req.json());
     const project = await prisma.videoProject.findUnique({ where: { id } });
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!project.itemId) {
+      return NextResponse.json({ error: "This project has no article to generate a script from" }, { status: 400 });
+    }
     const item = await prisma.newsItem.findUnique({
       where: { id: project.itemId },
       include: { media: true },

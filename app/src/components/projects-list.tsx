@@ -7,6 +7,7 @@ type ProjectRow = {
   id: string;
   title: string;
   aspect: string;
+  kind?: string;
   status: string;
   outputUrl: string;
   updatedAt: string;
@@ -25,7 +26,10 @@ export function ProjectsList() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
 
   useEffect(() => {
-    const load = () => fetch("/api/projects").then((r) => r.json()).then(setProjects);
+    const load = () =>
+      fetch("/api/projects")
+        .then((r) => r.json())
+        .then((all: ProjectRow[]) => setProjects(all.filter((p) => p.kind !== "montage")));
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);

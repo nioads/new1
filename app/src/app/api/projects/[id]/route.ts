@@ -16,10 +16,12 @@ export async function GET(
       include: { scenes: { orderBy: { order: "asc" } } },
     });
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const item = await prisma.newsItem.findUnique({
-      where: { id: project.itemId },
-      include: { media: true, feed: { select: { title: true } } },
-    });
+    const item = project.itemId
+      ? await prisma.newsItem.findUnique({
+          where: { id: project.itemId },
+          include: { media: true, feed: { select: { title: true } } },
+        })
+      : null;
     return NextResponse.json({ ...project, item });
   } catch (err) {
     return jsonError(err);

@@ -11,6 +11,7 @@ const links = [
   { href: "/categories", label: "Categories", adminOnly: false },
   { href: "/templates", label: "Templates", adminOnly: false },
   { href: "/projects", label: "Article → Video", adminOnly: false },
+  { href: "/short-videos", label: "Short Videos", adminOnly: false },
   { href: "/music", label: "Music", adminOnly: false },
   { href: "/brands", label: "Brands", adminOnly: true },
   { href: "/users", label: "Users", adminOnly: true },
