@@ -117,22 +117,32 @@ segments — a failed step retries alone without redoing the rest.
    (cut, crossfade, slide, zoom, glitch…), with a template-level default.
 7. **Intro / outro**: from the brand + template settings; logo watermark position/size
    per template per brand.
-8. **Captions**: Whisper (via fal) produces word-level timestamps in any language.
-   These feed a single **Canonical Caption JSON** (the source of truth) which is
-   then rendered by any of three engines that all read the same cues:
-   - **Remotion** (default, premium): word-by-word animated captions rendered by
-     headless Chromium to a transparent overlay — bundled Noto Naskh Arabic
-     guarantees correct RTL shaping/ligatures everywhere.
+8. **Captions** (Video → Scene → Caption Group → Word): Whisper (via fal) produces
+   word-level timestamps in any language. Each scene's words are divided into short
+   **caption groups** (2–5 words, semantic + timing aware — natural pauses, clause
+   punctuation, number+unit gluing, one-word conclusions). At playback exactly one
+   group shows at a time, the whole group stays visible while its words are spoken,
+   and only the current word is highlighted (stable layout — the active word never
+   reflows the line). Grouping is heuristic by default or LLM-semantic, and is fully
+   editable per scene (split / merge / move word / lock / correct timing).
+   The grouped model is a single **Canonical Caption JSON** (source of truth) fed to
+   three engines that read the same groups:
+   - **Remotion** (default, premium): progressive group + active-word render to a
+     transparent overlay — bundled Noto Naskh Arabic + per-word bidi isolation
+     guarantee correct Arabic shaping and mixed Arabic/Latin/number runs everywhere.
    - **libass** (fast fallback): ffmpeg burns ASS subtitles; auto-selected if
      Remotion is unavailable.
-   - **SRT / VTT** sidecar files exported alongside every render (accessibility /
-     platform-native captions).
-   All are **Hormozi-style** (word-by-word pop, emphasis colors, keyword
-   highlighting) and RTL-aware. Renderer is configurable globally (Settings) and
-   per project; caption style is a saved preset.
+   - **SRT / VTT** sidecars (one cue per group) exported alongside every render.
+   Renderer + caption style (typography, grouping rules, highlight mode, motion,
+   position) are configurable globally and per project.
 9. **Music**: pick from the Music Library (§7); auto-duck under voiceover.
-10. **Render**: BullMQ job → ffmpeg assembles intro + scenes (visual + Ken Burns/AI
-    motion + transitions) + TTS track + music + burned-in captions + outro → MP4.
+10. **Per-scene preview + approval**: every scene renders independently (media +
+    framing + voice-over + captions + music + logo) using the SAME Remotion caption
+    engine as the final export, so preview == output. Scenes carry a status
+    (Draft → Preview ready → Approved / Needs changes); with the approval gate on,
+    only Approved scenes are joined into the final video.
+11. **Render**: worker job → ffmpeg assembles intro + scenes (visual + Ken Burns/AI
+    motion + transitions) + TTS track + music + captions + outro → MP4.
     Progress shown live; result saved to the media library with re-render support.
 
 ## 7. Module: Music library

@@ -99,8 +99,28 @@ type StyleSpec = {
   outlineWidth: number;
   bold: boolean;
   uppercase: boolean;
-  wordsPerGroup: number;
-  position: "bottom" | "middle" | "top";
+  wordsPerGroup?: number;
+  position: "top" | "upper" | "middle" | "lower" | "bottom";
+  maxWidthPercent?: number;
+  // grouping
+  minWords?: number;
+  maxWords?: number;
+  targetWords?: number;
+  minDurationMs?: number;
+  maxDurationMs?: number;
+  followVoicePauses?: boolean;
+  keepNumbersWithUnits?: boolean;
+  allowSingleWordEmphasisGroup?: boolean;
+  // highlight
+  highlightMode?: "color" | "background" | "pill" | "underline";
+  activeBg?: string;
+  activeScale?: number;
+  transitionMs?: number;
+  holdUntilNextWord?: boolean;
+  // motion
+  groupEntrance?: "none" | "fade" | "pop";
+  groupExit?: "none" | "fade";
+  reducedMotion?: boolean;
 };
 type CaptionStyleDto = { id: string; name: string; builtin: boolean; style: StyleSpec };
 
@@ -279,9 +299,11 @@ function CaptionStyles() {
                 onChange={(e) => patch({ position: e.target.value as StyleSpec["position"] })}
                 className={inputCls}
               >
-                <option value="bottom">Bottom</option>
-                <option value="middle">Middle</option>
                 <option value="top">Top</option>
+                <option value="upper">Upper center</option>
+                <option value="middle">Center</option>
+                <option value="lower">Lower center</option>
+                <option value="bottom">Bottom</option>
               </select>
             </label>
             <div className="flex items-end gap-3 pb-1">
@@ -304,6 +326,127 @@ function CaptionStyles() {
                 UPPERCASE
               </label>
             </div>
+            <label className="block text-xs text-slate-400">
+              Max width %
+              <input
+                type="number"
+                min={40}
+                max={100}
+                value={selected.style.maxWidthPercent ?? 85}
+                onChange={(e) => patch({ maxWidthPercent: Number(e.target.value) })}
+                className={inputCls}
+              />
+            </label>
+          </div>
+
+          {/* Grouping */}
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 pt-1">Caption grouping</p>
+          <div className="grid grid-cols-3 gap-3">
+            <label className="block text-xs text-slate-400">
+              Min words
+              <input type="number" min={1} max={8} value={selected.style.minWords ?? 2}
+                onChange={(e) => patch({ minWords: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Max words
+              <input type="number" min={1} max={12} value={selected.style.maxWords ?? 5}
+                onChange={(e) => patch({ maxWords: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Preferred words
+              <input type="number" min={1} max={8} value={selected.style.targetWords ?? 3}
+                onChange={(e) => patch({ targetWords: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Min duration (ms)
+              <input type="number" min={200} max={3000} step={50} value={selected.style.minDurationMs ?? 700}
+                onChange={(e) => patch({ minDurationMs: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Max duration (ms)
+              <input type="number" min={1000} max={8000} step={100} value={selected.style.maxDurationMs ?? 4000}
+                onChange={(e) => patch({ maxDurationMs: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <div className="flex flex-col justify-end gap-1 pb-1">
+              <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                <input type="checkbox" checked={selected.style.followVoicePauses ?? true}
+                  onChange={(e) => patch({ followVoicePauses: e.target.checked })} className="accent-indigo-600" />
+                Follow voice pauses
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                <input type="checkbox" checked={selected.style.keepNumbersWithUnits ?? true}
+                  onChange={(e) => patch({ keepNumbersWithUnits: e.target.checked })} className="accent-indigo-600" />
+                Keep numbers + units
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                <input type="checkbox" checked={selected.style.allowSingleWordEmphasisGroup ?? true}
+                  onChange={(e) => patch({ allowSingleWordEmphasisGroup: e.target.checked })} className="accent-indigo-600" />
+                Allow 1-word emphasis
+              </label>
+            </div>
+          </div>
+
+          {/* Active-word highlight */}
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 pt-1">Active-word highlight</p>
+          <div className="grid grid-cols-3 gap-3">
+            <label className="block text-xs text-slate-400">
+              Style
+              <select value={selected.style.highlightMode ?? "background"}
+                onChange={(e) => patch({ highlightMode: e.target.value as StyleSpec["highlightMode"] })} className={inputCls}>
+                <option value="color">Color only</option>
+                <option value="background">Background box</option>
+                <option value="pill">Pill</option>
+                <option value="underline">Underline</option>
+              </select>
+            </label>
+            <label className="block text-xs text-slate-400">
+              Highlight bg
+              <input type="color" value={selected.style.activeBg ?? "#e11d48"}
+                onChange={(e) => patch({ activeBg: e.target.value })}
+                className="mt-1 w-full h-8 rounded-lg bg-slate-800 border border-slate-700" />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Active scale
+              <input type="number" min={1} max={1.5} step={0.02} value={selected.style.activeScale ?? 1.06}
+                onChange={(e) => patch({ activeScale: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="block text-xs text-slate-400">
+              Transition (ms)
+              <input type="number" min={0} max={600} step={10} value={selected.style.transitionMs ?? 140}
+                onChange={(e) => patch({ transitionMs: Number(e.target.value) })} className={inputCls} />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400 pb-1 self-end">
+              <input type="checkbox" checked={selected.style.holdUntilNextWord ?? true}
+                onChange={(e) => patch({ holdUntilNextWord: e.target.checked })} className="accent-indigo-600" />
+              Hold until next word
+            </label>
+          </div>
+
+          {/* Motion */}
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 pt-1">Motion</p>
+          <div className="grid grid-cols-3 gap-3">
+            <label className="block text-xs text-slate-400">
+              Group entrance
+              <select value={selected.style.groupEntrance ?? "pop"}
+                onChange={(e) => patch({ groupEntrance: e.target.value as StyleSpec["groupEntrance"] })} className={inputCls}>
+                <option value="none">None</option>
+                <option value="fade">Fade</option>
+                <option value="pop">Pop</option>
+              </select>
+            </label>
+            <label className="block text-xs text-slate-400">
+              Group exit
+              <select value={selected.style.groupExit ?? "fade"}
+                onChange={(e) => patch({ groupExit: e.target.value as StyleSpec["groupExit"] })} className={inputCls}>
+                <option value="none">None</option>
+                <option value="fade">Fade</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400 pb-1 self-end">
+              <input type="checkbox" checked={selected.style.reducedMotion ?? false}
+                onChange={(e) => patch({ reducedMotion: e.target.checked })} className="accent-indigo-600" />
+              Reduced motion
+            </label>
           </div>
           <div className="flex items-center gap-2">
             <button
