@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { BrandDto, NewsItemDto } from "@/lib/types";
 import type { MusicTrackDto } from "@/components/music";
+import { SceneCaptionPanel } from "@/components/scene-caption-panel";
 
 const VIDEO_URL = /\.(mp4|m4v|mov|webm|m3u8)(\?|#|$)/i;
 
@@ -19,6 +20,32 @@ const SCRIPT_LANGS: Array<{ code: string; label: string }> = [
   { code: "tr", label: "Turkish — Türkçe" },
   { code: "de", label: "German — Deutsch" },
 ];
+
+export type CaptionWordUnit = {
+  id: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  direction: "rtl" | "ltr";
+};
+export type CaptionGroup = {
+  groupId: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  direction: "rtl" | "ltr";
+  words: CaptionWordUnit[];
+  locked?: boolean;
+};
+
+export type SceneStatus =
+  | "DRAFT"
+  | "QUEUED"
+  | "PROCESSING"
+  | "PREVIEW_READY"
+  | "REQUIRES_CHANGES"
+  | "APPROVED"
+  | "RENDER_FAILED";
 
 type SceneDto = {
   id: string;
@@ -37,6 +64,10 @@ type SceneDto = {
   focusX: number;
   focusY: number;
   zoom: number;
+  captionGroups?: CaptionGroup[] | null;
+  status: SceneStatus;
+  previewUrl: string;
+  previewError: string;
 };
 
 type VoiceDto = { id: string; name: string; previewUrl: string; labels: string };
@@ -55,6 +86,7 @@ type ProjectDto = {
   captionsEnabled: boolean;
   captionStyleId: string | null;
   captionRenderer: string;
+  requireApproval: boolean;
   captionSrtUrl?: string;
   captionVttUrl?: string;
   brandId: string | null;
@@ -144,6 +176,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
         captionRenderer: project.captionRenderer,
+        requireApproval: project.requireApproval,
         scenes: project.scenes.map((s) => ({
           id: s.id,
           text: s.text,
@@ -347,6 +380,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </select>
           </>
         )}
+        <label
+          className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs text-slate-300 cursor-pointer"
+          title="Only scenes you've approved are joined into the final video"
+        >
+          <input
+            type="checkbox"
+            checked={project.requireApproval}
+            onChange={(e) => setProject({ ...project, requireApproval: e.target.checked })}
+            className="accent-indigo-600"
+          />
+          Approve scenes
+        </label>
         <button
           onClick={() => save()}
           className="rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-sm"
@@ -728,6 +773,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     saveAll={() => save()}
                   />
                 )}
+                <div className="mt-2 border-t border-slate-800 pt-2">
+                  <SceneCaptionPanel
+                    scene={scene}
+                    captionsEnabled={project.captionsEnabled}
+                    onRefresh={load}
+                  />
+                </div>
               </div>
             </div>
           ))}
