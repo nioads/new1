@@ -26,6 +26,12 @@ RUN npx prisma generate && npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 COPY --from=build /app ./
+# Install the bundled Noto Naskh Arabic into the system so the libass caption
+# fallback resolves the exact family name the ASS references (independent of
+# whatever the distro's font-noto-arabic package happens to provide).
+RUN mkdir -p /usr/share/fonts/truetype/app \
+    && cp /app/remotion/public/fonts/NotoNaskhArabic-*.ttf /usr/share/fonts/truetype/app/ \
+    && fc-cache -f
 EXPOSE 3000
 # web:    npm run start
 # worker: npm run worker

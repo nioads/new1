@@ -18,6 +18,7 @@ import {
   interpolate,
   spring,
 } from "remotion";
+import { NASKH_REGULAR_B64, NASKH_BOLD_B64 } from "./naskh-font";
 
 type Direction = "rtl" | "ltr";
 type WordUnit = { id: string; text: string; startMs: number; endMs: number; direction: Direction };
@@ -80,11 +81,14 @@ function flatten(doc: CaptionDocument): AbsGroup[] {
   return out.sort((a, b) => a.startMs - b.startMs);
 }
 
+// Arabic is embedded as base64 (no file-serving/system-font dependency, so it
+// shapes correctly in any Chromium — Docker/Alpine included). Latin uses the
+// bundled DejaVu with the browser's own sans fallback (Latin never tofus).
 const FONT_CSS = `
-@font-face { font-family:'CapArabic'; src:url('${staticFile("fonts/NotoNaskhArabic-Regular.ttf")}') format('truetype'); font-weight:400; }
-@font-face { font-family:'CapArabic'; src:url('${staticFile("fonts/NotoNaskhArabic-Bold.ttf")}') format('truetype'); font-weight:700; }
-@font-face { font-family:'CapLatin'; src:url('${staticFile("fonts/DejaVuSans.ttf")}') format('truetype'); font-weight:400; }
-@font-face { font-family:'CapLatin'; src:url('${staticFile("fonts/DejaVuSans-Bold.ttf")}') format('truetype'); font-weight:700; }
+@font-face { font-family:'CapArabic'; src:url(data:font/ttf;base64,${NASKH_REGULAR_B64}) format('truetype'); font-weight:400; font-display:block; }
+@font-face { font-family:'CapArabic'; src:url(data:font/ttf;base64,${NASKH_BOLD_B64}) format('truetype'); font-weight:700; font-display:block; }
+@font-face { font-family:'CapLatin'; src:url('${staticFile("fonts/DejaVuSans.ttf")}') format('truetype'); font-weight:400; font-display:block; }
+@font-face { font-family:'CapLatin'; src:url('${staticFile("fonts/DejaVuSans-Bold.ttf")}') format('truetype'); font-weight:700; font-display:block; }
 `;
 
 function useFonts() {
@@ -93,7 +97,18 @@ function useFonts() {
     let cancelled = false;
     (async () => {
       try {
-        if (document.fonts?.ready) await document.fonts.ready;
+        const f = document.fonts;
+        if (f) {
+          // Explicitly load each family/weight and WAIT — never continue to
+          // frame capture with an unresolved (fallback → tofu) Arabic font.
+          await Promise.all([
+            f.load("400 40px CapArabic"),
+            f.load("700 40px CapArabic"),
+            f.load("400 40px CapLatin"),
+            f.load("700 40px CapLatin"),
+          ]).catch(() => {});
+          if (f.ready) await f.ready;
+        }
       } catch {
         /* fonts API unavailable */
       }
