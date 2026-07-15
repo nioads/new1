@@ -1,0 +1,357 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(EDITOR)
+  createdAt    DateTime @default(now())
+
+  pushSubscriptions PushSubscription[]
+}
+
+enum StorageType {
+  LOCAL
+  S3
+}
+
+model Brand {
+  id             String      @id @default(cuid())
+  name           String      @unique
+  logoUrl        String      @default("")
+  primaryColor   String      @default("#4f46e5")
+  secondaryColor String      @default("#ef4444")
+  fontFamily     String      @default("")
+  // Per-brand storage backend for media and renders
+  storageType    StorageType @default(LOCAL)
+  s3Endpoint     String      @default("")
+  s3Region       String      @default("")
+  s3Bucket       String      @default("")
+  s3AccessKeyId  String      @default("")
+  s3SecretKey    String      @default("")
+  s3PublicBaseUrl String     @default("")
+  // video branding: intro/outro clips prepended/appended to article→video renders
+  introUrl       String      @default("")
+  outroUrl       String      @default("")
+  // default caption style for this brand's videos (projects inherit it)
+  captionStyleId String?
+  createdAt      DateTime    @default(now())
+
+  feeds          Feed[]
+  templates      ImageTemplate[]
+  assets         MediaAsset[]
+  videoTemplates VideoTemplate[]
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+// Every media file found in an RSS item (enclosures, media:content,
+// media:thumbnail, images embedded in the content HTML).
+model NewsItemMedia {
+  id       String    @id @default(cuid())
+  itemId   String
+  item     NewsItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  url      String
+  type     MediaType
+  mimeType String    @default("")
+  source   String    @default("") // enclosure | media:content | media:thumbnail | content-html
+
+  @@unique([itemId, url])
+}
+
+// Uploaded / stored files (logos, composer uploads, renders).
+model MediaAsset {
+  id        String   @id @default(cuid())
+  brandId   String?
+  brand     Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  kind      String   @default("upload") // upload | logo | render
+  url       String
+  storageKey String  @default("")
+  mimeType  String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model ImageTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  brandId   String?
+  brand     Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  // editorial style: breaking | quotes | events | attacks | custom
+  kind      String   @default("breaking")
+  // video motion defaults: {duration, fps, kenburns, textAnim}
+  motion    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants TemplateVariant[]
+}
+
+enum RenderStatus {
+  QUEUED
+  PROCESSING
+  DONE
+  ERROR
+}
+
+// DB-backed render queue consumed by the worker's ffmpeg pipeline.
+model VideoRender {
+  id         String       @id @default(cuid())
+  status     RenderStatus @default(QUEUED)
+  aspect     String
+  // {width, height, duration, fps, background:{kind,path|url}, overlayPath, kenburns, textAnim}
+  params     Json
+  outputUrl  String       @default("")
+  error      String       @default("")
+  itemId     String?
+  templateId String?
+  brandId    String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([status, createdAt])
+}
+
+// One template has up to three linked size variants.
+model TemplateVariant {
+  id         String        @id @default(cuid())
+  templateId String
+  template   ImageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  aspect     String // "16:9" | "9:16" | "1:1"
+  width      Int
+  height     Int
+  elements   Json          @default("[]")
+
+  @@unique([templateId, aspect])
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#6366f1")
+  muted     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  feeds Feed[]
+  items NewsItem[]
+}
+
+model Feed {
+  id           String    @id @default(cuid())
+  url          String    @unique
+  title        String    @default("")
+  siteUrl      String    @default("")
+  enabled      Boolean   @default(true)
+  muted        Boolean   @default(false)
+  categoryId   String
+  category     Category  @relation(fields: [categoryId], references: [id])
+  brandId      String?
+  brand        Brand?    @relation(fields: [brandId], references: [id])
+  // conditional GET state
+  etag         String    @default("")
+  lastModified String    @default("")
+  lastCheckedAt DateTime?
+  lastError    String    @default("")
+  errorCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  items NewsItem[]
+
+  @@index([enabled])
+}
+
+model NewsItem {
+  id          String    @id @default(cuid())
+  feedId      String
+  feed        Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  guid        String
+  link        String    @default("")
+  title       String
+  summary     String    @default("")
+  content     String    @default("")
+  author      String    @default("")
+  imageUrl    String    @default("")
+  publishedAt DateTime
+  fetchedAt   DateTime  @default(now())
+  readAt      DateTime?
+  // set once the article page has been fetched and text/media extracted
+  enrichedAt  DateTime?
+
+  media NewsItemMedia[]
+
+  @@unique([feedId, guid])
+  @@index([publishedAt(sort: Desc)])
+  @@index([categoryId, publishedAt(sort: Desc)])
+  @@index([feedId, publishedAt(sort: Desc)])
+}
+
+// Key-value app settings editable from the admin UI (AI keys, model choices…).
+model Setting {
+  key   String @id
+  value String
+}
+
+// Caption look presets (Hormozi-style word highlighting etc.), user-manageable.
+model CaptionStyle {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  // {fontSize, baseColor, activeColor, outlineColor, outlineWidth, bold,
+  //  uppercase, wordsPerGroup, position: "bottom"|"middle"|"top"}
+  style     Json
+  builtin   Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model MusicTrack {
+  id          String   @id @default(cuid())
+  name        String
+  url         String
+  storageKey  String   @default("")
+  durationSec Float    @default(0)
+  source      String   @default("upload") // upload | elevenlabs | fal
+  createdAt   DateTime @default(now())
+}
+
+enum ProjectStatus {
+  DRAFT
+  QUEUED
+  RENDERING
+  DONE
+  ERROR
+}
+
+// Saved short-video (montage) template: a reusable recipe for a 1–3 clip video.
+model VideoTemplate {
+  id             String   @id @default(cuid())
+  name           String
+  brandId        String?  // null = generic (available to all brands)
+  brand          Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  aspect         String   @default("9:16") // 9:16 | 1:1 | 16:9 | 4:5
+  clipCount      Int      @default(1) // 1–3 animated photos/videos
+  perClipSeconds Float    @default(4) // default duration per clip (total capped at 15s)
+  transition     String   @default("fade") // fade | cut
+  kenburns       String   @default("in") // in | out | left | right | none
+  captionStyleId String?
+  musicTrackId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+enum SceneStatus {
+  DRAFT // not yet previewed
+  QUEUED // preview render requested
+  PROCESSING // preview rendering now
+  PREVIEW_READY // preview available for review
+  REQUIRES_CHANGES // user rejected — needs edits
+  APPROVED // approved for final assembly
+  RENDER_FAILED // preview render failed
+}
+
+// Article → Video project: script broken into scenes, each with its own
+// visual, narration, motion and transition; assembled by the worker.
+model VideoProject {
+  id           String        @id @default(cuid())
+  // article→video projects link a news item; montage (short-video) projects don't
+  itemId       String?
+  kind         String        @default("article") // "article" | "montage"
+  title        String        @default("")
+  brandId      String?
+  aspect       String        @default("16:9") // 16:9 | 9:16
+  width        Int           @default(1920)
+  height       Int           @default(1080)
+  status       ProjectStatus @default(DRAFT)
+  scriptPrompt String        @default("")
+  script       String        @default("")
+  musicTrackId String?
+  // default ElevenLabs voice for all scenes (scenes can override)
+  voiceId      String        @default("")
+  // pre-generation options
+  targetSeconds Int          @default(60)
+  scriptModel   String       @default("") // override the settings default
+  scriptLang    String       @default("") // "" = match article; "ar" | "en" | ...
+  visualMode    String       @default("search") // search | ai
+  // AI social metadata for this content
+  smHighlight   String       @default("")
+  smCaption     String       @default("")
+  smDescription String       @default("")
+  smTags        String       @default("")
+  captionsEnabled Boolean    @default(true)
+  captionStyleId  String?
+  captionRenderer String     @default("") // "" = use global setting; "remotion" | "libass"
+  // when true, only APPROVED scenes are joined into the final video
+  requireApproval Boolean    @default(false)
+  captionSrtUrl String        @default("")
+  captionVttUrl String        @default("")
+  outputUrl    String        @default("")
+  error        String        @default("")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  scenes Scene[]
+
+  @@index([status, createdAt])
+}
+
+model Scene {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order       Int
+  text        String       @default("")
+  imageUrl    String       @default("")
+  imageQuery  String       @default("") // search query used/editable
+  imagePrompt String       @default("") // AI generation prompt used/editable
+  ttsUrl      String       @default("")
+  ttsDuration Float        @default(0)
+  // per-scene voice override (empty = project voice)
+  voiceId     String       @default("")
+  kenburns    String       @default("in") // in | out | left | right | none
+  transition  String       @default("fade") // fade | cut (to next scene)
+  durationSec Float        @default(4)
+  // framing when the source aspect differs from the video:
+  // fit: cover (fill+crop) | blur (fit + blurred bg) | contain (letterbox)
+  fit         String       @default("cover")
+  focusX      Float        @default(0.5) // crop focal point, 0..1
+  focusY      Float        @default(0.5)
+  zoom        Float        @default(1.0) // static zoom, >=1
+  // word-level caption timings relative to scene audio: [{w,s,e}]
+  words       Json?
+  // edited caption groups (scene-relative ms) — source of truth for captions
+  // when present; otherwise groups are derived from `words` at render time.
+  captionGroups Json?
+  // per-scene preview + approval workflow
+  status       SceneStatus @default(DRAFT)
+  previewUrl   String      @default("")
+  previewError String      @default("")
+
+  @@index([projectId, order])
+  @@index([status])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}

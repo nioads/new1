@@ -1,0 +1,82 @@
+services:
+  web:
+    build: ./app
+    command: sh -c "npx prisma migrate deploy && npm run db:seed && npm run start"
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:-app}@postgres:5432/newsstudio
+      # Dev fallback so first run needs zero setup. Override in production:
+      #   AUTH_SECRET=$(openssl rand -base64 32) docker compose up -d
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-secret-override-in-production}
+      AUTH_TRUST_HOST: "true"
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin1234}
+      MEDIA_DIR: /app/data/media
+      SEARXNG_URL: http://searxng:8080
+    volumes:
+      - media:/app/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: ./app
+    command: npm run worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:-app}@postgres:5432/newsstudio
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      POLL_INTERVAL_MS: "30000"
+      MEDIA_DIR: /app/data/media
+      SEARXNG_URL: http://searxng:8080
+    volumes:
+      - media:/app/data/media
+    depends_on:
+      web:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: newsstudio
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d newsstudio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Used by Phase 3/4 job queues (video rendering, AI pipelines).
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+
+  # Self-hosted metasearch add-on used by article→video image/video search.
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+    volumes:
+      - ./searxng:/etc/searxng:ro
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
