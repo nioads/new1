@@ -117,10 +117,19 @@ segments — a failed step retries alone without redoing the rest.
    (cut, crossfade, slide, zoom, glitch…), with a template-level default.
 7. **Intro / outro**: from the brand + template settings; logo watermark position/size
    per template per brand.
-8. **Captions**: Whisper (via fal) produces word-level timestamps in any language →
-   **Hormozi-style animated captions** (word-by-word pop, emphasis colors, keyword
-   highlighting), RTL-aware for Arabic. Caption style is configurable and saved as
-   presets.
+8. **Captions**: Whisper (via fal) produces word-level timestamps in any language.
+   These feed a single **Canonical Caption JSON** (the source of truth) which is
+   then rendered by any of three engines that all read the same cues:
+   - **Remotion** (default, premium): word-by-word animated captions rendered by
+     headless Chromium to a transparent overlay — bundled Noto Naskh Arabic
+     guarantees correct RTL shaping/ligatures everywhere.
+   - **libass** (fast fallback): ffmpeg burns ASS subtitles; auto-selected if
+     Remotion is unavailable.
+   - **SRT / VTT** sidecar files exported alongside every render (accessibility /
+     platform-native captions).
+   All are **Hormozi-style** (word-by-word pop, emphasis colors, keyword
+   highlighting) and RTL-aware. Renderer is configurable globally (Settings) and
+   per project; caption style is a saved preset.
 9. **Music**: pick from the Music Library (§7); auto-duck under voiceover.
 10. **Render**: BullMQ job → ffmpeg assembles intro + scenes (visual + Ken Burns/AI
     motion + transitions) + TTS track + music + burned-in captions + outro → MP4.

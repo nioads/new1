@@ -49,6 +49,7 @@ const patchSchema = z.object({
   voiceId: z.string().optional(),
   captionsEnabled: z.boolean().optional(),
   captionStyleId: z.string().nullable().optional(),
+  captionRenderer: z.enum(["", "remotion", "libass"]).optional(),
   aspect: z.enum(["16:9", "9:16"]).optional(),
   brandId: z.string().nullable().optional(),
   targetSeconds: z.number().int().min(10).max(1800).optional(),
@@ -77,6 +78,7 @@ export async function PATCH(
     if (body.visualMode !== undefined) data.visualMode = body.visualMode;
     if (body.captionsEnabled !== undefined) data.captionsEnabled = body.captionsEnabled;
     if (body.captionStyleId !== undefined) data.captionStyleId = body.captionStyleId;
+    if (body.captionRenderer !== undefined) data.captionRenderer = body.captionRenderer;
     if (body.brandId !== undefined) data.brandId = body.brandId;
     if (body.aspect !== undefined) {
       data.aspect = body.aspect;

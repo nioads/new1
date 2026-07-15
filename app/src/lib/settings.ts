@@ -18,6 +18,7 @@ export const SETTING_DEFS = [
   { key: "TTS_PROVIDER", label: "TTS provider", secret: false, def: "elevenlabs" },
   { key: "TTS_VOICE_ID", label: "ElevenLabs voice ID", secret: false, def: "pNInz6obpgDQGcFmaJgB" },
   { key: "TTS_MODEL", label: "ElevenLabs TTS model", secret: false, def: "eleven_multilingual_v2" },
+  { key: "CAPTION_RENDERER", label: "Caption renderer (remotion | libass)", secret: false, def: "remotion" },
 ] as const;
 
 export type Settings = Record<(typeof SETTING_DEFS)[number]["key"], string>;

@@ -12,12 +12,17 @@ import { generateImage, ffprobeDuration } from "./ai";
 import { getSettings } from "./settings";
 import {
   buildAss,
+  buildCaptionDocument,
+  buildSrt,
+  buildVtt,
   estimateWords,
   BUILTIN_CAPTION_STYLES,
+  type CaptionDocument,
   type CaptionStyleSpec,
   type CaptionWord,
   type SceneCaption,
 } from "./captions";
+import { renderCaptionOverlay } from "./remotion";
 
 const FFMPEG = () => process.env.FFMPEG_PATH ?? "ffmpeg";
 const FPS = 25;
@@ -332,21 +337,37 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
     if (brand?.logoUrl) {
       logoPath = (await resolveOptionalLocalFile(brand.logoUrl, `project-tmp/${job.id}`))?.path ?? null;
     }
+    // Build the Canonical Caption JSON once — the single source of truth that
+    // feeds every caption renderer and the SRT/VTT sidecars.
     let assPath: string | null = null;
+    let overlayPath: string | null = null;
+    let captionDoc: CaptionDocument | null = null;
     if (job.captionsEnabled && sceneCaptions.length > 0) {
       let spec: CaptionStyleSpec = BUILTIN_CAPTION_STYLES[0].style;
       if (job.captionStyleId) {
         const style = await prisma.captionStyle.findUnique({ where: { id: job.captionStyleId } });
         if (style) spec = style.style as unknown as CaptionStyleSpec;
       }
-      assPath = path.join(workDir, "captions.ass");
-      await writeFile(assPath, buildAss(sceneCaptions, spec, job.width, job.height));
+      captionDoc = buildCaptionDocument(sceneCaptions, spec, job.width, job.height, FPS);
+
+      const renderer = (job.captionRenderer || settings.CAPTION_RENDERER || "remotion").toLowerCase();
+      if (renderer === "remotion") {
+        // Premium path: render an alpha overlay with Remotion. On any failure
+        // (missing browser, bundle error) fall through to libass automatically.
+        overlayPath = path.join(workDir, "captions.webm");
+        const ok = await renderCaptionOverlay(captionDoc, overlayPath);
+        if (!ok) overlayPath = null;
+      }
+      if (!overlayPath) {
+        assPath = path.join(workDir, "captions.ass");
+        await writeFile(assPath, buildAss(captionDoc));
+      }
     }
 
     // 2b. Second pass over the concatenated video: logo watermark + burned
     //     captions (video) and music bed (audio). Input 0 is always the concat;
     //     music/logo get the next indices only when present.
-    const needVideoFx = !!logoPath || !!assPath;
+    const needVideoFx = !!logoPath || !!assPath || !!overlayPath;
     const needAudioFx = !!musicPath;
     if (!needVideoFx && !needAudioFx) {
       await rm(outPath, { force: true }).catch(() => {});
@@ -357,6 +378,7 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
       let idx = 1;
       let musicIdx = -1;
       let logoIdx = -1;
+      let capIdx = -1;
       if (musicPath) {
         args.push("-stream_loop", "-1", "-i", musicPath);
         musicIdx = idx++;
@@ -364,6 +386,10 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
       if (logoPath) {
         args.push("-i", logoPath);
         logoIdx = idx++;
+      }
+      if (overlayPath) {
+        args.push("-i", overlayPath);
+        capIdx = idx++;
       }
       const fc: string[] = [];
       let vOut = "0:v";
@@ -375,6 +401,13 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
           fc.push(`[${logoIdx}:v]scale=${logoW}:-1[lg]`);
           fc.push(`${v}[lg]overlay=W-w-${m}:${m}[lv]`);
           v = "[lv]";
+        }
+        if (capIdx >= 0) {
+          // Composite the Remotion alpha caption overlay (may be shorter than
+          // the video — hold nothing after it ends).
+          fc.push(`[${capIdx}:v]scale=${job.width}:${job.height},setsar=1[cap]`);
+          fc.push(`${v}[cap]overlay=0:0:eof_action=pass[cv]`);
+          v = "[cv]";
         }
         if (assPath) {
           const escaped = assPath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
@@ -413,9 +446,48 @@ export async function processNextProject(prisma: PrismaClient): Promise<boolean>
         mimeType: "video/mp4",
       },
     });
+
+    // Sidecar caption files from the same canonical document (accessibility /
+    // platform-native captions). Stored alongside the render.
+    let captionSrtUrl = "";
+    let captionVttUrl = "";
+    if (captionDoc && captionDoc.cues.length > 0) {
+      const srt = await storeFile(
+        brand,
+        Buffer.from(buildSrt(captionDoc), "utf8"),
+        `project-${job.id}.srt`,
+        "application/x-subrip",
+      );
+      const vtt = await storeFile(
+        brand,
+        Buffer.from(buildVtt(captionDoc), "utf8"),
+        `project-${job.id}.vtt`,
+        "text/vtt",
+      );
+      captionSrtUrl = srt.url;
+      captionVttUrl = vtt.url;
+      for (const c of [srt, vtt]) {
+        await prisma.mediaAsset.create({
+          data: {
+            brandId: job.brandId,
+            kind: "caption",
+            url: c.url,
+            storageKey: c.storageKey,
+            mimeType: c.url.endsWith(".vtt") ? "text/vtt" : "application/x-subrip",
+          },
+        });
+      }
+    }
+
     await prisma.videoProject.update({
       where: { id: job.id },
-      data: { status: "DONE", outputUrl: stored.url, error: "" },
+      data: {
+        status: "DONE",
+        outputUrl: stored.url,
+        error: "",
+        captionSrtUrl,
+        captionVttUrl,
+      },
     });
     console.log(`[project] ${job.id} done → ${stored.url} (${total.toFixed(1)}s)`);
   } catch (err) {

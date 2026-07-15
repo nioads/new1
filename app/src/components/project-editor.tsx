@@ -41,6 +41,9 @@ type ProjectDto = {
   voiceId: string;
   captionsEnabled: boolean;
   captionStyleId: string | null;
+  captionRenderer: string;
+  captionSrtUrl?: string;
+  captionVttUrl?: string;
   brandId: string | null;
   targetSeconds: number;
   scriptModel: string;
@@ -125,6 +128,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         visualMode: project.visualMode,
         captionsEnabled: project.captionsEnabled,
         captionStyleId: project.captionStyleId,
+        captionRenderer: project.captionRenderer,
         scenes: project.scenes.map((s) => ({
           id: s.id,
           text: s.text,
@@ -302,19 +306,31 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           Captions
         </label>
         {project.captionsEnabled && (
-          <select
-            value={project.captionStyleId ?? ""}
-            onChange={(e) => setProject({ ...project, captionStyleId: e.target.value || null })}
-            className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs"
-            title="Caption style (manage in Settings)"
-          >
-            <option value="">Hormozi (default)</option>
-            {captionStyles.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={project.captionStyleId ?? ""}
+              onChange={(e) => setProject({ ...project, captionStyleId: e.target.value || null })}
+              className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs"
+              title="Caption style (manage in Settings)"
+            >
+              <option value="">Hormozi (default)</option>
+              {captionStyles.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={project.captionRenderer || ""}
+              onChange={(e) => setProject({ ...project, captionRenderer: e.target.value })}
+              className="rounded-lg bg-slate-900 border border-slate-800 px-2 py-1.5 text-xs"
+              title="Caption renderer — Remotion is animated & premium; libass is faster"
+            >
+              <option value="">Renderer: default</option>
+              <option value="remotion">Remotion (animated)</option>
+              <option value="libass">libass (fast)</option>
+            </select>
+          </>
         )}
         <button
           onClick={() => save()}
@@ -339,9 +355,21 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
       {project.status === "DONE" && project.outputUrl && (
         <div className="rounded-xl bg-slate-900 border border-emerald-800/40 p-4 space-y-2">
           <video controls src={project.outputUrl} className="w-full max-h-96 rounded-lg" />
-          <a href={project.outputUrl} download className="text-sm text-emerald-400 hover:underline">
-            ⬇ Download MP4
-          </a>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <a href={project.outputUrl} download className="text-emerald-400 hover:underline">
+              ⬇ Download MP4
+            </a>
+            {project.captionSrtUrl && (
+              <a href={project.captionSrtUrl} download className="text-emerald-400 hover:underline">
+                ⬇ Captions (.srt)
+              </a>
+            )}
+            {project.captionVttUrl && (
+              <a href={project.captionVttUrl} download className="text-emerald-400 hover:underline">
+                ⬇ Captions (.vtt)
+              </a>
+            )}
+          </div>
         </div>
       )}
 
